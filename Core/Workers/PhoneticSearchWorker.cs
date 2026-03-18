@@ -35,13 +35,13 @@ public class PhoneticSearchWorker : BaseWorker
             return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
 
-        var entry = _customers[_rnd.Next(_customers.Count)];
+        var Customer = _customers[_rnd.Next(_customers.Count)];
 
         var payload = new
         {
-            name = entry.Name,
-            address = entry.Address,
-            postalCode = entry.PostalCode
+            name = Customer.Name,
+            address = Customer.Address,
+            postalCode = Customer.PostalCode
         };
 
         var json = JsonSerializer.Serialize(payload);

@@ -6,5 +6,7 @@ public class CustomerEntry
     public string PostalCode { get; set; }
     public string City { get; set; }
     public Guid SystemId { get; set; }
-    public string Email { get; set; }       
+    public string Email { get; set; }     
+    public string Firstname  { get; set; }     
+    public string Surname{ get; set; }     
 }

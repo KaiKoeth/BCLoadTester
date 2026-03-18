@@ -39,11 +39,13 @@ public class ShipToAddressCreateWorker : BaseWorker
         }
 
         CustomerEntry customer;
+        CustomerEntry CustAddress;
 
         // 🔥 THREAD SAFE RANDOM bleibt
         lock (_rndLock)
         {
             customer = _customers[_rnd.Next(_customers.Count)];
+            CustAddress = _customers[_rnd.Next(_customers.Count)];
         }
 
         var url = _endpointBase.Replace(
@@ -57,14 +59,14 @@ public class ShipToAddressCreateWorker : BaseWorker
             defaultShiptoAddress = false,
             salutationCode = "W",
             displayName = customer.Name,
-            firstName = customer.Name,
-            surname = "Lasttest",
-            addressLine1 = customer.Address,
+            firstName = customer.Firstname,
+            surname = customer.Surname,
+            addressLine1 = CustAddress.Address,
             addressLine2 = "TEST",
-            street = customer.Address,
+            street = CustAddress.Address,
             houseNo = "1",
-            postalCode = customer.PostalCode,
-            city = customer.City,
+            postalCode = CustAddress.PostalCode,
+            city = CustAddress.City,
             country = "DE"
         };
 

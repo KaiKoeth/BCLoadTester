@@ -37,7 +37,8 @@ public class CustomerCreateWorker : BaseWorker
             return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
 
-        var entry = _customers[_rnd.Value!.Next(_customers.Count)];
+        var NameEntry = _customers[_rnd.Value!.Next(_customers.Count)];
+        var AddrEntry = _customers[_rnd.Value!.Next(_customers.Count)];
 
         string email = $"loadtest{Guid.NewGuid():N}@test.de";
 
@@ -47,15 +48,15 @@ public class CustomerCreateWorker : BaseWorker
             creditworthinessClass = 0,
             type = "Person",
             salutationCode = "M",
-            displayName = Utils.SafeData.TrimTo(entry.Name, 30),
-            firstName = Utils.SafeData.TrimTo(entry.Name, 30),
-            surname = "Loadtest",
-            addressLine1 = entry.Address,
+            displayName = Utils.SafeData.TrimTo(NameEntry.Name, 30),
+            firstName = NameEntry.Firstname,
+            surname = NameEntry.Surname,
+            addressLine1 = AddrEntry.Address,
             addressLine2 = "",
-            street = entry.Address,
+            street = AddrEntry.Address,
             houseNo = "1",
-            postalCode = entry.PostalCode,
-            city = entry.City,
+            postalCode = AddrEntry.PostalCode,
+            city = AddrEntry.City,
             country = "DE",
             phoneNumber = "",
             email = email,
