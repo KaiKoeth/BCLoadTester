@@ -26,7 +26,7 @@ public class OrderStatusWorker : BaseWorker
             .Replace("{company}", companyId);
     }
 
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
         // 🔥 Pool Size live tracken (bleibt!)
         _stats.SetPoolSize(_workerName, _company, _pool.Count);
@@ -39,7 +39,7 @@ public class OrderStatusWorker : BaseWorker
         else
             customerNo = _pool.GetRandom();
 
-        // 🔥 Pool leer → eigener Fehler
+        // 🔥 Pool leer → echter Fehler (BLEIBT Exception!)
         if (customerNo == null)
         {
             await Task.Delay(200, token);
@@ -59,19 +59,16 @@ public class OrderStatusWorker : BaseWorker
 
         await response.Content.LoadIntoBufferAsync();
 
+        // 🔥 Retry bleibt
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync();
-
-            // 🔥 Retry bleibt
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
             }
-
-            throw new Exception(
-                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
-            );
         }
+
+        // 🔥 KEIN throw bei HTTP Fehlern
+        return response;
     }
 }

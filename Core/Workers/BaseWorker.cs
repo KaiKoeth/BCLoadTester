@@ -37,59 +37,47 @@ public abstract class BaseWorker : IWorker
 
             try
             {
-                await ExecuteAsync(token);
+                var response = await ExecuteAsync(token);
 
-                // ✅ Request zählen inkl. RPM
+                // ✅ Request zählen
                 _stats.RequestSent(_workerName, _company, _rpm);
+
+                // 🔥 HTTP Fehler erkennen (DEIN FIX)
+                if (response != null && !response.IsSuccessStatusCode)
+                {
+                    var msg = $"{(int)response.StatusCode} {response.ReasonPhrase}";
+                    _stats.Error(_workerName, _company, msg);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                // 🔥 sauberes Error Handling
-                var message = BuildErrorMessage(ex);
-
-                _stats.Error(_workerName, _company, message);
+                _stats.Error(_workerName, _company, ex.Message);
             }
 
             sw.Stop();
 
-            // ✅ Response Time tracken
             _stats.AddResponseTime(_workerName, _company, sw.ElapsedMilliseconds);
 
-            // ✅ Ziel-RPM einhalten
             var delay = _delayMs - (int)sw.ElapsedMilliseconds;
+
             if (delay > 0)
             {
                 try
                 {
                     await Task.Delay(delay, token);
                 }
-                catch
+                catch (OperationCanceledException)
                 {
-                    // ignore cancellation
+                    break;
                 }
             }
         }
     }
 
-    protected abstract Task ExecuteAsync(CancellationToken token);
-
-    // =========================================
-    // 🔥 Zentrale Fehler-Aufbereitung
-    // =========================================
-    private string BuildErrorMessage(Exception ex)
-    {
-        // HTTP Fehler schöner darstellen
-        if (ex is HttpRequestException httpEx)
-        {
-            if (httpEx.StatusCode != null)
-            {
-                return $"HTTP {(int)httpEx.StatusCode} - {httpEx.StatusCode}";
-            }
-
-            return $"HTTP ERROR - {httpEx.Message}";
-        }
-
-        // Standard
-        return ex.Message;
-    }
+    // 🔥 WICHTIG: MUSS implementiert werden!
+    protected abstract Task<HttpResponseMessage> ExecuteAsync(CancellationToken token);
 }

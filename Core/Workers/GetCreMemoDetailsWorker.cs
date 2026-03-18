@@ -26,17 +26,17 @@ public class GetCreMemoDetailsWorker : BaseWorker
             .Replace("{company}", companyId);
     }
 
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
         if (_customers.Count == 0)
         {
             await Task.Delay(1000, token);
-            return;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
 
         var customer = _customers[_rnd.Value!.Next(_customers.Count)];
 
-        // 🔥 Encoding bleibt unverändert
+        // 🔥 Encoding bleibt
         var encodedCustomer = Uri.EscapeDataString(customer);
 
         var url = _endpointBase.Replace("{customer}", encodedCustomer);
@@ -48,20 +48,16 @@ public class GetCreMemoDetailsWorker : BaseWorker
 
         await response.Content.LoadIntoBufferAsync();
 
+        // 🔥 Retry bleibt
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync();
-
-            // 🔥 Retry unverändert
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
             }
-
-            // 🔥 volle Fehlerdetails
-            throw new Exception(
-                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
-            );
         }
+
+        // 🔥 KEIN throw mehr
+        return response;
     }
 }

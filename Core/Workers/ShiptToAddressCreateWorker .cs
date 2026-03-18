@@ -30,12 +30,12 @@ public class ShipToAddressCreateWorker : BaseWorker
             .Replace("{company}", companyId);
     }
 
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
         if (_customers.Count == 0)
         {
             await Task.Delay(1000, token);
-            return;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
 
         CustomerEntry customer;
@@ -76,21 +76,21 @@ public class ShipToAddressCreateWorker : BaseWorker
         request.Headers.Add("If-Match", "*");
         request.Content = content;
 
-        using var response = await _client.SendAsync(request, token);
+        var response = await _client.SendAsync(request, token);
 
-        var body = await response.Content.ReadAsStringAsync(); // bleibt!
+        // 🔥 Body lesen (für Buffer + Debug)
+        var body = await response.Content.ReadAsStringAsync();
 
+        // 🔥 Retry bleibt
         if (!response.IsSuccessStatusCode)
         {
-            // 🔥 Retry bleibt
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
             }
-
-            throw new Exception(
-                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
-            );
         }
+
+        // 🔥 KEIN throw mehr!
+        return response;
     }
 }

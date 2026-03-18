@@ -36,17 +36,37 @@ public class WebOrderCreateWorker : BaseWorker
         _companyId = companyId;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
+        // 🔥 Pool Size für UI (live)
+        _stats.SetPoolSize(_workerName, _company, _payloadPool.Count);
+
         // 🔥 JSON aus Pool holen
         var json = _payloadPool.GetRandom();
 
-        // 🔥 JSON → Dictionary
-        var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(json)!;
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            await Task.Delay(200, token);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
+        }
 
-        // 🔥 neue eindeutige OrderNo (20 Zeichen)
+        // 🔥 JSON → Dictionary
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+
+        if (payload == null)
+        {
+            await Task.Delay(200, token);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
+        }
+
+        // 🔥 eindeutige OrderNo (max 20 Zeichen!)
         var now = DateTime.UtcNow;
+
         var id = $"{now:yyMMddHHmmssfff}{Interlocked.Increment(ref _counter) % 1000:000}";
+
+        // 🔥 Safety (falls sich Format mal ändert)
+        if (id.Length > 20)
+            id = id.Substring(0, 20);
 
         // 🔥 Felder überschreiben
         payload["shopOrderNumber"] = id;
@@ -68,22 +88,16 @@ public class WebOrderCreateWorker : BaseWorker
         // 🔥 wichtig für Connection Reuse
         await response.Content.LoadIntoBufferAsync();
 
+        // 🔥 Retry bleibt
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync();
-
-            // 🔥 Retry bleibt wie gehabt
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
             }
-
-            throw new Exception(
-                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
-            );
         }
 
-        // 🔥 Pool Size für UI
-        _stats.SetPoolSize(_workerName, _company, _payloadPool.Count);
+        // 🔥 KEIN throw mehr!
+        return response;
     }
 }

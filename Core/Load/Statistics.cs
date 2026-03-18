@@ -171,10 +171,6 @@ public class Statistics
     }
     private string NormalizeWorker(string worker)
     {
-        if (string.IsNullOrWhiteSpace(worker))
-            return worker;
-
-        var idx = worker.IndexOf(" (x");
-        return idx > 0 ? worker.Substring(0, idx) : worker;
+        return worker?.Trim() ?? "";
     }
 }

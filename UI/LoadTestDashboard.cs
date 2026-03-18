@@ -34,6 +34,7 @@ public partial class LoadTestDashboard : Form
     private Dictionary<string, List<string>> _creditMemoCustomerNoCache = new();
     private Dictionary<string, OrderStatusPool> _orderStatusCache = new();
     private Dictionary<string, WebOrderPayloadPool> _webOrderPoolCache = new();
+    private Dictionary<(string Company, string Worker), int> _workerCounts = new();
 
     System.Windows.Forms.Timer? _loadingTimer;
     string _loadingPhase = "Loading";
@@ -260,6 +261,8 @@ public partial class LoadTestDashboard : Form
                         _config.maxWorkersPerType);
 
                     int workerRpm = Math.Max(1, rpm / parallelWorkers);
+                    string workerKey = worker.type;
+                    _workerCounts[(company.name, workerKey)] = parallelWorkers;
                     string workerDisplayName = $"{worker.type} (x{parallelWorkers})";
 
                     for (int i = 0; i < parallelWorkers; i++)
@@ -275,7 +278,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
 
                             case "PMCSearch":
@@ -287,7 +290,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
 
                             case "CustomerCreate":
@@ -299,7 +302,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
 
                             case "CreateShipToAddress":
@@ -310,7 +313,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
 
                             case "WebOrderCreate":
@@ -322,7 +325,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                     break;
 
                             case "GetInvoiceDetails":
@@ -334,7 +337,7 @@ public partial class LoadTestDashboard : Form
                                     _config.serviceRoot,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
 
                             case "GetCreMemoDetails":
@@ -347,7 +350,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
 
                             case "CustomerHistory":
@@ -360,7 +363,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
 
                             case "OrderStatus":
@@ -371,7 +374,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerDisplayName));
+                                    _stats, workerKey));
                                 break;
                         }
                     }
@@ -502,61 +505,73 @@ public partial class LoadTestDashboard : Form
     }
 
     private void BuildRows(IEnumerable<(string Worker, string Company, long Rpm, long Requests, long Errors, double Rps, int PoolSize, double AvgMs, long MaxMs)> stats)
-    {
-        var previousState = _allRows
-            .Where(r => r.IsGroup)
-            .ToDictionary(r => r.Company, r => r.IsExpanded);
-
-        _allRows.Clear();
-
-        foreach (var companyGroup in stats.GroupBy(s => s.Company))
         {
-            var companyName = companyGroup.Key;
+            var previousState = _allRows
+                .Where(r => r.IsGroup)
+                .ToDictionary(r => r.Company, r => r.IsExpanded);
 
-            bool isExpanded = previousState.ContainsKey(companyName)
-                ? previousState[companyName]
-                : false;
+            _allRows.Clear();
 
-            // 🔹 Gruppenzeile
-            _allRows.Add(new DashboardRow
+            foreach (var companyGroup in stats.GroupBy(s => s.Company))
             {
-                Company = companyName,
-                IsGroup = true,
-                IsExpanded = isExpanded,
+                var companyName = companyGroup.Key;
 
-                RPM = companyGroup.Sum(x => ExtractTotalRpm(x.Worker, x.Rpm)),
-                Requests = companyGroup.Sum(x => x.Requests),
-                Errors = companyGroup.Sum(x => x.Errors),
-                AvgMs = companyGroup.Average(x => x.AvgMs),
-                MaxMs = companyGroup.Max(x => x.MaxMs)
-            });
+                bool isExpanded = previousState.ContainsKey(companyName)
+                    ? previousState[companyName]
+                    : false;
 
-            // 🔹 Worker-Zeilen
-            foreach (var w in companyGroup)
-            {
-                string workerName = w.Worker;
-
-                // 🔥 Pool nur für OrderStatus anhängen
-                if (workerName.StartsWith("OrderStatus") && w.PoolSize > 0)
-                {
-                    workerName += $"({w.PoolSize})";
-                }
-
+                // 🔹 Gruppenzeile
                 _allRows.Add(new DashboardRow
                 {
                     Company = companyName,
-                    Worker = workerName,
-                    IsGroup = false,
+                    IsGroup = true,
+                    IsExpanded = isExpanded,
 
-                    RPM = ExtractTotalRpm(w.Worker, w.Rpm), // bleibt korrekt
-                    Requests = w.Requests,
-                    Errors = w.Errors,
-                    AvgMs = w.AvgMs,
-                    MaxMs = w.MaxMs
+                    RPM = companyGroup.Sum(x => ExtractTotalRpm(x.Worker, x.Rpm)),
+                    Requests = companyGroup.Sum(x => x.Requests),
+                    Errors = companyGroup.Sum(x => x.Errors),
+                    AvgMs = companyGroup.Average(x => x.AvgMs),
+                    MaxMs = companyGroup.Max(x => x.MaxMs)
                 });
+
+                // 🔹 Worker-Zeilen
+                foreach (var w in companyGroup)
+                {
+                    string displayWorker = w.Worker;
+
+                    // ✅ WICHTIG: (xN) aus Cache holen (NICHT aus String!)
+                    if (_workerCounts.TryGetValue((companyName, w.Worker), out var count) && count > 1)
+                    {
+                        displayWorker += $" (x{count})";
+                    }
+
+                    // ✅ Pool anzeigen
+                    if (w.Worker == "OrderStatus" && w.PoolSize > 0)
+                    {
+                        displayWorker += $" ({w.PoolSize})";
+                    }
+
+                    _allRows.Add(new DashboardRow
+                    {
+                        Company = companyName,
+
+                        // 🔥 CLEAN KEY (für Stats!)
+                        Worker = w.Worker,
+
+                        // 🔥 NUR Anzeige
+                        DisplayWorker = displayWorker,
+
+                        IsGroup = false,
+
+                        RPM = ExtractTotalRpm(w.Worker, w.Rpm),
+                        Requests = w.Requests,
+                        Errors = w.Errors,
+                        AvgMs = w.AvgMs,
+                        MaxMs = w.MaxMs
+                    });
+                }
             }
         }
-    }
 
     private long ExtractTotalRpm(string workerName, long workerRpm)
     {
@@ -601,11 +616,12 @@ public partial class LoadTestDashboard : Form
 
             string companyDisplay = row.IsGroup
                 ? (row.IsExpanded ? "▼ " : "▶ ") + row.Company
-                : ""; // 🔥 leer für Worker
+                : "";
 
+            // ✅ HIER war dein Fehler
             string workerDisplay = row.IsGroup
                 ? ""
-                : "    " + row.Worker;
+                : "    " + (row.DisplayWorker ?? row.Worker);
 
             int rowIndex = statsGrid.Rows.Add(
                 companyDisplay,
@@ -619,14 +635,12 @@ public partial class LoadTestDashboard : Form
                 row.MaxMs.ToString("0")
             );
 
-            // 🔹 Bold für Gruppen
             if (row.IsGroup)
             {
                 statsGrid.Rows[rowIndex].DefaultCellStyle.Font =
                     new Font(statsGrid.Font, FontStyle.Bold);
             }
 
-            // 🔴 Fehler einfärben
             var errorCell = statsGrid.Rows[rowIndex].Cells[4];
             errorCell.Style.ForeColor = row.Errors > 0 ? Color.Red : Color.Black;
         }
@@ -689,9 +703,10 @@ public partial class LoadTestDashboard : Form
             // =========================
             // 👉 2. ERROR CLICK
             // =========================
-            if (e.ColumnIndex == 4 && !row.IsGroup) // Column 4 = Errors
+            if (e.ColumnIndex == 4 && !row.IsGroup)
             {
-                var errors = _stats.GetErrors(row.Worker, row.Company);
+                var workerKey = NormalizeWorkerName(row.Worker);
+                var errors = _stats.GetErrors(workerKey, row.Company);
 
                 if (errors.Count == 0)
                 {
@@ -703,7 +718,7 @@ public partial class LoadTestDashboard : Form
                     errors.OrderByDescending(x => x.Value)
                         .Select(x => $"{x.Key}: {x.Value}"));
 
-                MessageBox.Show(text, $"Errors - {row.Worker}");
+                MessageBox.Show(text, $"Errors - {row.DisplayWorker ?? row.Worker}");
             }
         }
  
@@ -765,5 +780,30 @@ public partial class LoadTestDashboard : Form
         textbox.Text = sb.ToString();
 
         form.Show();
+    }
+
+    private string NormalizeWorkerName(string worker)
+    {
+        if (string.IsNullOrWhiteSpace(worker))
+            return worker;
+
+        var idx = worker.IndexOf(" (");
+        return idx > 0 ? worker.Substring(0, idx) : worker;
+    }
+
+    private int ExtractParallelCount(string workerName)
+    {
+        var start = workerName.IndexOf("(x");
+        var end = workerName.IndexOf(")");
+
+        if (start >= 0 && end > start)
+        {
+            var numberText = workerName.Substring(start + 2, end - start - 2);
+
+            if (int.TryParse(numberText, out int count))
+                return count;
+        }
+
+        return 1;
     }
 }

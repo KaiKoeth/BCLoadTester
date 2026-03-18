@@ -29,12 +29,12 @@ public class CustomerCreateWorker : BaseWorker
             .Replace("{company}", companyId);
     }
 
-    protected override async Task ExecuteAsync(CancellationToken token)
+    protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
         if (_customers.Count == 0)
         {
             await Task.Delay(1000, token);
-            return;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
 
         var entry = _customers[_rnd.Value!.Next(_customers.Count)];
@@ -73,20 +73,16 @@ public class CustomerCreateWorker : BaseWorker
 
         await response.Content.LoadIntoBufferAsync();
 
+        // 🔥 Retry bleibt
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync();
-
-            // 🔥 Retry Logik behalten
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
             }
-
-            // 🔥 WICHTIG: volle Details werfen
-            throw new Exception(
-                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
-            );
         }
+
+        // 🔥 GANZ WICHTIG: IMMER zurückgeben!
+        return response;
     }
 }
