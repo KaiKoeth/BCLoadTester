@@ -1,6 +1,7 @@
 namespace BCLoadtester.Loadtest;
 
 using System.Diagnostics;
+using System.Net.Http;
 
 public abstract class BaseWorker : IWorker
 {
@@ -10,7 +11,7 @@ public abstract class BaseWorker : IWorker
     protected readonly string _company;
 
     private readonly int _delayMs;
-    private readonly long _rpm; // 🔥 NEU
+    private readonly int _rpm;
 
     protected BaseWorker(
         HttpClient client,
@@ -24,9 +25,8 @@ public abstract class BaseWorker : IWorker
         _workerName = workerName;
         _company = company;
 
-        _rpm = rpm; // 🔥 NEU
-
-        _delayMs = Math.Max(1, 60000 / rpm);
+        _rpm = Math.Max(1, rpm);
+        _delayMs = Math.Max(1, 60000 / _rpm);
     }
 
     public async Task Run(CancellationToken token)
@@ -39,22 +39,57 @@ public abstract class BaseWorker : IWorker
             {
                 await ExecuteAsync(token);
 
-                // 🔥 FIX
+                // ✅ Request zählen inkl. RPM
                 _stats.RequestSent(_workerName, _company, _rpm);
             }
             catch (Exception ex)
             {
-                _stats.Error(_workerName, _company, ex.Message);
+                // 🔥 sauberes Error Handling
+                var message = BuildErrorMessage(ex);
+
+                _stats.Error(_workerName, _company, message);
             }
 
             sw.Stop();
+
+            // ✅ Response Time tracken
             _stats.AddResponseTime(_workerName, _company, sw.ElapsedMilliseconds);
 
+            // ✅ Ziel-RPM einhalten
             var delay = _delayMs - (int)sw.ElapsedMilliseconds;
             if (delay > 0)
-                await Task.Delay(delay, token);
+            {
+                try
+                {
+                    await Task.Delay(delay, token);
+                }
+                catch
+                {
+                    // ignore cancellation
+                }
+            }
         }
     }
 
     protected abstract Task ExecuteAsync(CancellationToken token);
+
+    // =========================================
+    // 🔥 Zentrale Fehler-Aufbereitung
+    // =========================================
+    private string BuildErrorMessage(Exception ex)
+    {
+        // HTTP Fehler schöner darstellen
+        if (ex is HttpRequestException httpEx)
+        {
+            if (httpEx.StatusCode != null)
+            {
+                return $"HTTP {(int)httpEx.StatusCode} - {httpEx.StatusCode}";
+            }
+
+            return $"HTTP ERROR - {httpEx.Message}";
+        }
+
+        // Standard
+        return ex.Message;
+    }
 }

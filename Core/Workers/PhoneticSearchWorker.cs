@@ -8,7 +8,7 @@ public class PhoneticSearchWorker : BaseWorker
     private readonly List<CustomerEntry> _customers;
     private readonly string _url;
 
-    private readonly Random _rnd = new Random(); // 🔥 bewusst NICHT ThreadLocal
+    private readonly Random _rnd = new Random(); // bewusst so lassen
 
     public PhoneticSearchWorker(
         HttpClient client,
@@ -29,54 +29,42 @@ public class PhoneticSearchWorker : BaseWorker
 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
-        // 🔥 exakt wie vorher
         if (_customers.Count == 0)
         {
             await Task.Delay(1000, token);
             return;
         }
 
-        try
+        var entry = _customers[_rnd.Next(_customers.Count)];
+
+        var payload = new
         {
-            var entry = _customers[_rnd.Next(_customers.Count)];
+            name = entry.Name,
+            address = entry.Address,
+            postalCode = entry.PostalCode
+        };
 
-            var payload = new
+        var json = JsonSerializer.Serialize(payload);
+
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        var response = await _client.PostAsync(_url, content, token);
+
+        await response.Content.LoadIntoBufferAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+
+            // 🔥 Retry bleibt identisch
+            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
-                name = entry.Name,
-                address = entry.Address,
-                postalCode = entry.PostalCode
-            };
-
-            var json = JsonSerializer.Serialize(payload);
-
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            var response = await _client.PostAsync(_url, content, token);
-
-            // 🔥 wichtig für Connection Reuse
-            await response.Content.LoadIntoBufferAsync();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorText = $"{(int)response.StatusCode} {response.ReasonPhrase}";
-
-                // 🔥 Retry exakt wie vorher
-                if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
-                {
-                    await Task.Delay(200, token);
-                }
-
-                throw new Exception(errorText);
+                await Task.Delay(200, token);
             }
-        }
-        catch (Exception ex)
-        {
-            // 🔥 identisches Verhalten wie vorher
-            var errorText = ex is TaskCanceledException
-                ? "Timeout"
-                : ex.GetType().Name;
 
-            throw new Exception(errorText);
+            throw new Exception(
+                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
+            );
         }
     }
 }

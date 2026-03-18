@@ -20,7 +20,7 @@ public class GetInvoiceDetailsWorker : BaseWorker
     {
         _customers = customers;
 
-        // 🔥 exakt wie vorher (HARDCODE bewusst erhalten!)
+        // 🔥 HARDCODE bleibt unverändert
         _endpointBase =
             $"{serviceRoot}/API/macits/baur/v1.0/companies({companyId})" +
             "/salesInvoiceHeaders?$expand=salesInvoiceLines&$filter=customerNumber eq '{customer}'";
@@ -28,51 +28,40 @@ public class GetInvoiceDetailsWorker : BaseWorker
 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
-        // 🔥 exakt wie vorher
         if (_customers.Count == 0)
         {
             await Task.Delay(1000, token);
             return;
         }
 
-        try
+        var customer = _customers[_rnd.Value!.Next(_customers.Count)];
+
+        // 🔥 Encoding bleibt
+        var encodedCustomer = Uri.EscapeDataString(customer);
+
+        var url = _endpointBase.Replace("{customer}", encodedCustomer);
+
+        var response = await _client.GetAsync(
+            url,
+            HttpCompletionOption.ResponseHeadersRead,
+            token);
+
+        await response.Content.LoadIntoBufferAsync();
+
+        if (!response.IsSuccessStatusCode)
         {
-            var customer = _customers[_rnd.Value!.Next(_customers.Count)];
+            var body = await response.Content.ReadAsStringAsync();
 
-            // 🔥 Encoding bleibt erhalten
-            var encodedCustomer = Uri.EscapeDataString(customer);
-
-            var url = _endpointBase.Replace("{customer}", encodedCustomer);
-
-            var response = await _client.GetAsync(
-                url,
-                HttpCompletionOption.ResponseHeadersRead,
-                token);
-
-            // 🔥 wichtig für Connection Pooling
-            await response.Content.LoadIntoBufferAsync();
-
-            if (!response.IsSuccessStatusCode)
+            // 🔥 Retry bleibt
+            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
-                var errorText = $"{(int)response.StatusCode} {response.ReasonPhrase}";
-
-                // 🔥 Retry exakt wie vorher
-                if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
-                {
-                    await Task.Delay(200, token);
-                }
-
-                throw new Exception(errorText);
+                await Task.Delay(200, token);
             }
-        }
-        catch (Exception ex)
-        {
-            // 🔥 identisches Verhalten wie vorher
-            var errorText = ex is TaskCanceledException
-                ? "Timeout"
-                : ex.GetType().Name;
 
-            throw new Exception(errorText);
+            // 🔥 volle Fehlerdetails
+            throw new Exception(
+                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
+            );
         }
     }
 }

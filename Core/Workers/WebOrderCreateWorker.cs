@@ -40,27 +40,29 @@ public class WebOrderCreateWorker : BaseWorker
         var url = $"{_serviceRoot}{_apiRoot}{_endpoint}"
             .Replace("{company}", _companyId);
 
-        var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
         var response = await _client.PostAsync(url, content, token);
 
-        // wichtig für Connection Reuse
+        // 🔥 wichtig für Connection Reuse
         await response.Content.LoadIntoBufferAsync();
 
         if (!response.IsSuccessStatusCode)
         {
-            var errorText = $"{(int)response.StatusCode} {response.ReasonPhrase}";
+            var body = await response.Content.ReadAsStringAsync();
 
-            // Retry bei BC-Überlast
+            // 🔥 Retry bleibt exakt wie vorher
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
             }
 
-            throw new Exception(errorText);
+            throw new Exception(
+                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
+            );
         }
 
-        // Optional: Pool Size für UI anzeigen
+        // 🔥 Pool Size bleibt
         _stats.SetPoolSize(_workerName, _company, _payloadPool.Count);
     }
 }

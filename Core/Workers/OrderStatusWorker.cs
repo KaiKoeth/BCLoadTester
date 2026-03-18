@@ -28,61 +28,50 @@ public class OrderStatusWorker : BaseWorker
 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
-        try
+        // 🔥 Pool Size live tracken (bleibt!)
+        _stats.SetPoolSize(_workerName, _company, _pool.Count);
+
+        string? customerNo;
+
+        // 🔥 Hybrid Verhalten bleibt
+        if (_rnd.Value!.Next(100) < 10)
+            customerNo = _pool.TakeRandom();
+        else
+            customerNo = _pool.GetRandom();
+
+        // 🔥 Pool leer → eigener Fehler
+        if (customerNo == null)
         {
-            // 🔥 Pool Size live tracken (wie vorher)
-            _stats.SetPoolSize(_workerName, _company, _pool.Count);
+            await Task.Delay(200, token);
+            throw new Exception("PoolEmpty");
+        }
 
-            string? customerNo;
+        var separator = _endpointBase.Contains("?") ? "&" : "?";
 
-            // 🔥 Hybrid-Verhalten bleibt exakt
-            if (_rnd.Value!.Next(100) < 10)
-                customerNo = _pool.TakeRandom();
-            else
-                customerNo = _pool.GetRandom();
+        var encodedCustomer = Uri.EscapeDataString(customerNo);
 
-            // 🔥 PoolEmpty Verhalten bleibt (inkl. Delay!)
-            if (customerNo == null)
+        var url = $"{_endpointBase}{separator}$filter=customerNumber eq '{encodedCustomer}'";
+
+        var response = await _client.GetAsync(
+            url,
+            HttpCompletionOption.ResponseHeadersRead,
+            token);
+
+        await response.Content.LoadIntoBufferAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+
+            // 🔥 Retry bleibt
+            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
-                throw new Exception("PoolEmpty");
             }
 
-            var separator = _endpointBase.Contains("?") ? "&" : "?";
-
-            var encodedCustomer = Uri.EscapeDataString(customerNo);
-
-            var url = $"{_endpointBase}{separator}$filter=customerNumber eq '{encodedCustomer}'";
-
-            var response = await _client.GetAsync(
-                url,
-                HttpCompletionOption.ResponseHeadersRead,
-                token);
-
-            // 🔥 wichtig für Connection Reuse
-            await response.Content.LoadIntoBufferAsync();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorText = $"{(int)response.StatusCode} {response.ReasonPhrase}";
-
-                // 🔥 Retry exakt wie vorher
-                if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
-                {
-                    await Task.Delay(200, token);
-                }
-
-                throw new Exception(errorText);
-            }
-        }
-        catch (Exception ex)
-        {
-            // 🔥 identisches Fehlerverhalten wie vorher
-            var errorText = ex is TaskCanceledException
-                ? "Timeout"
-                : ex.Message; // ⚠️ wichtig: Message wegen PoolEmpty
-
-            throw new Exception(errorText);
+            throw new Exception(
+                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
+            );
         }
     }
 }

@@ -28,51 +28,40 @@ public class GetCreMemoDetailsWorker : BaseWorker
 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
-        // 🔥 exakt wie vorher
         if (_customers.Count == 0)
         {
             await Task.Delay(1000, token);
             return;
         }
 
-        try
+        var customer = _customers[_rnd.Value!.Next(_customers.Count)];
+
+        // 🔥 Encoding bleibt unverändert
+        var encodedCustomer = Uri.EscapeDataString(customer);
+
+        var url = _endpointBase.Replace("{customer}", encodedCustomer);
+
+        var response = await _client.GetAsync(
+            url,
+            HttpCompletionOption.ResponseHeadersRead,
+            token);
+
+        await response.Content.LoadIntoBufferAsync();
+
+        if (!response.IsSuccessStatusCode)
         {
-            var customer = _customers[_rnd.Value!.Next(_customers.Count)];
+            var body = await response.Content.ReadAsStringAsync();
 
-            // 🔥 WICHTIG: Encoding bleibt erhalten
-            var encodedCustomer = Uri.EscapeDataString(customer);
-
-            var url = _endpointBase.Replace("{customer}", encodedCustomer);
-
-            var response = await _client.GetAsync(
-                url,
-                HttpCompletionOption.ResponseHeadersRead,
-                token);
-
-            // 🔥 wichtig für Connection Reuse
-            await response.Content.LoadIntoBufferAsync();
-
-            if (!response.IsSuccessStatusCode)
+            // 🔥 Retry unverändert
+            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
-                var errorText = $"{(int)response.StatusCode} {response.ReasonPhrase}";
-
-                // 🔥 Retry exakt wie vorher
-                if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
-                {
-                    await Task.Delay(200, token);
-                }
-
-                throw new Exception(errorText);
+                await Task.Delay(200, token);
             }
-        }
-        catch (Exception ex)
-        {
-            // 🔥 identisches Verhalten wie vorher
-            var errorText = ex is TaskCanceledException
-                ? "Timeout"
-                : ex.GetType().Name;
 
-            throw new Exception(errorText);
+            // 🔥 volle Fehlerdetails
+            throw new Exception(
+                $"HTTP {(int)response.StatusCode} - {response.ReasonPhrase} | {body}"
+            );
         }
     }
 }
