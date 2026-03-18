@@ -1,6 +1,7 @@
 namespace BCLoadtester.Loadtest;
 
 using System.Text;
+using System.Text.Json;
 
 public class WebOrderCreateWorker : BaseWorker
 {
@@ -10,6 +11,8 @@ public class WebOrderCreateWorker : BaseWorker
     private readonly string _apiRoot;
     private readonly string _endpoint;
     private readonly string _companyId;
+
+    private static int _counter = 0;
 
     public WebOrderCreateWorker(
         HttpClient client,
@@ -35,12 +38,30 @@ public class WebOrderCreateWorker : BaseWorker
 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
-        var payload = _payloadPool.GetRandom();
+        // 🔥 JSON aus Pool holen
+        var json = _payloadPool.GetRandom();
+
+        // 🔥 JSON → Dictionary
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(json)!;
+
+        // 🔥 neue eindeutige OrderNo (20 Zeichen)
+        var now = DateTime.UtcNow;
+        var id = $"{now:yyMMddHHmmssfff}{Interlocked.Increment(ref _counter) % 1000:000}";
+
+        // 🔥 Felder überschreiben
+        payload["shopOrderNumber"] = id;
+        payload["externalReferenceNo"] = id;
+        payload["externalDocumentNo"] = id;
+        payload["basketId"] = id;
+        payload["orderDateTime"] = now;
+
+        // 🔥 zurück zu JSON
+        var newJson = JsonSerializer.Serialize(payload);
 
         var url = $"{_serviceRoot}{_apiRoot}{_endpoint}"
             .Replace("{company}", _companyId);
 
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var content = new StringContent(newJson, Encoding.UTF8, "application/json");
 
         var response = await _client.PostAsync(url, content, token);
 
@@ -51,7 +72,7 @@ public class WebOrderCreateWorker : BaseWorker
         {
             var body = await response.Content.ReadAsStringAsync();
 
-            // 🔥 Retry bleibt exakt wie vorher
+            // 🔥 Retry bleibt wie gehabt
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
                 await Task.Delay(200, token);
@@ -62,7 +83,7 @@ public class WebOrderCreateWorker : BaseWorker
             );
         }
 
-        // 🔥 Pool Size bleibt
+        // 🔥 Pool Size für UI
         _stats.SetPoolSize(_workerName, _company, _payloadPool.Count);
     }
 }

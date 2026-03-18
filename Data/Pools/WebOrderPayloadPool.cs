@@ -1,10 +1,12 @@
 namespace BCLoadtester.Loadtest;
 
 using System.Text.Json;
+using System.Threading;
 
 public class WebOrderPayloadPool
 {
     private readonly List<string> _payloads;
+
     private static readonly JsonSerializerOptions _jsonOptions =
         new(JsonSerializerDefaults.Web);
 
@@ -67,22 +69,21 @@ public class WebOrderPayloadPool
             });
         }
 
-        var id = Guid.NewGuid().ToString("N")[..20];
-        var now = DateTime.UtcNow;
+        // 🔥 UNIQUE ID (20 Zeichen safe)
 
         var payload = new
         {
-            externalReferenceNo = id,
-            externalDocumentNo = id,
-            basketId = id,
-            shopOrderNumber = id,
-            orderDateTime = now,
+            externalReferenceNo ="",
+            externalDocumentNo = "",
+            basketId = "",
+            shopOrderNumber = "",
+            orderDateTime = DateTime.UtcNow,
 
             sellToCustomerNo = customer.No,
             sellToCustSalutationCode = customer.salutation,
             sellToCustomerName = customer.Name,
-            sellToCustomerFirstName = Utils.SafeData.TrimTo(customer.FirstName,30),
-            sellToCustomerSurname = Utils.SafeData.TrimTo(customer.Surname,30),
+            sellToCustomerFirstName = Utils.SafeData.TrimTo(customer.FirstName, 30),
+            sellToCustomerSurname = Utils.SafeData.TrimTo(customer.Surname, 30),
             sellToStreet = customer.Street,
             sellToHouseNo = customer.HouseNo,
             sellToAddress = customer.Address,
@@ -92,8 +93,8 @@ public class WebOrderPayloadPool
 
             shipToCustSalutationCode = customer.salutation,
             shipToName = customer.Name,
-            shipToCustomerFirstName =  Utils.SafeData.TrimTo(customer.FirstName,30),
-            shipToCustomerSurname = Utils.SafeData.TrimTo(customer.Surname,30),
+            shipToCustomerFirstName = Utils.SafeData.TrimTo(customer.FirstName, 30),
+            shipToCustomerSurname = Utils.SafeData.TrimTo(customer.Surname, 30),
             shipToStreet = customer.Street,
             shipToHouseNo = customer.HouseNo,
             shipToAddress = customer.Address,
