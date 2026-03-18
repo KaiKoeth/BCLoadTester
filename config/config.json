@@ -73,7 +73,7 @@
       "webOrderConfig": {
         "minLines": 2,
         "maxLines": 6,
-        "payloadPoolSize": 60000
+        "WeborderPoolSize": 60000
       }
     },
     {
@@ -94,7 +94,7 @@
       "webOrderConfig": {
         "minLines": 1,
         "maxLines": 3,
-        "payloadPoolSize": 2000
+        "WeborderPoolSize": 2000
       }
     },
     {
@@ -115,7 +115,7 @@
       "webOrderConfig": {
         "minLines": 2,
         "maxLines": 3,
-        "payloadPoolSize": 60000
+        "WeborderPoolSize": 60000
       }
     },
     {
@@ -136,7 +136,7 @@
       "webOrderConfig": {
         "minLines": 2,
         "maxLines": 3,
-        "payloadPoolSize": 60000
+        "WeborderPoolSize": 60000
       }
     },
     {
@@ -157,7 +157,7 @@
       "webOrderConfig": {
         "minLines": 2,
         "maxLines": 3,
-        "payloadPoolSize": 60000
+        "WeborderPoolSize": 60000
       }
     },
     {
@@ -178,7 +178,7 @@
       "webOrderConfig": {
         "minLines": 2,
         "maxLines": 3,
-        "payloadPoolSize": 60000
+        "WeborderPoolSize": 60000
       }
     }
   ]

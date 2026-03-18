@@ -80,6 +80,8 @@ public class SetupForm : Form
         }
         grid.Columns.Add("minLines", "MinLines");
         grid.Columns.Add("maxLines", "MaxLines");
+        grid.Columns.Add("Weborder Pool", "WeborderPoolSize");
+        
 
         grid.Columns["company"].ReadOnly = true;
     }
@@ -102,6 +104,7 @@ public class SetupForm : Form
 
             values.Add(c.webOrderConfig?.minLines ?? 0);
             values.Add(c.webOrderConfig?.maxLines ?? 0);
+            values.Add(c.webOrderConfig?.WeborderPoolSize ?? 0);
 
             grid.Rows.Add(values.ToArray());
         }
@@ -139,8 +142,11 @@ public class SetupForm : Form
                 company.webOrderConfig.minLines =
                     Convert.ToInt32(row.Cells[colIndex].Value ?? 0);
 
-                company.webOrderConfig.maxLines =
+                company.webOrderConfig.maxLines =                
                     Convert.ToInt32(row.Cells[colIndex + 1].Value ?? 0);
+
+                company.webOrderConfig.WeborderPoolSize =
+                    Convert.ToInt32(row.Cells[colIndex + 2].Value ?? 0);
             }
         }
 

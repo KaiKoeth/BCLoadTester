@@ -476,7 +476,7 @@ public partial class LoadTestDashboard : Form
                     profile,
                     company.webOrderConfig.minLines,
                     company.webOrderConfig.maxLines,
-                    company.webOrderConfig.payloadPoolSize
+                    company.webOrderConfig.WeborderPoolSize
                 );
 
                 // 🔥 Fortschritt
@@ -773,6 +773,10 @@ public partial class LoadTestDashboard : Form
 
             if (_orderStatusCache.TryGetValue(company, out var os))
                 sb.AppendLine($"OrderStatus Pool: {os.Count}");
+
+            if (_webOrderPoolCache.TryGetValue(company, out var wp))
+                sb.AppendLine($"Weborder Pool: {wp.Count}");
+            
 
             sb.AppendLine();
         }

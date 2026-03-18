@@ -9,7 +9,7 @@ public class Company
     {
         public int minLines { get; set; }
         public int maxLines { get; set; }
-        public int payloadPoolSize { get; set; } = 2000;
+        public int WeborderPoolSize { get; set; } = 2000;
     }
     public WebOrderConfig webOrderConfig { get; set; }
 }
