@@ -1,0 +1,185 @@
+{
+  "serviceRoot": "http://localhost:5007/BAURLSTWS",
+  "apiRoot": "/API/macits/baur/v1.0",
+  "username": "admin",
+  "password": "P@ssword1",
+  "connectionString": "Server=localhost,37327;Database=BAUR_LST;User Id=divasys;Password=xEz1cO3nodqrQoPkmIy7;TrustServerCertificate=True;",
+  "rpmPerWorker": 500,
+  "maxWorkersPerType": 50,
+  "maxConnectionsPerServer": 1000,
+  "workers": [
+    {
+      "type": "EmailSearch",
+      "endpoint": "/companies({company})/customers?$expand=customerFinancialDetail,shipToAddresses,blocks\u0026$filter=email eq \u0027{email}\u0027",
+      "enabled": false
+    },
+    {
+      "type": "PMCSearch",
+      "endpoint": "/ODataV4/Operations_SearchCustomerPhonetic",
+      "enabled": false
+    },
+    {
+      "type": "CustomerCreate",
+      "endpoint": "/companies({company})/customers",
+      "enabled": false
+    },
+    {
+      "type": "CreateShipToAddress",
+      "endpoint": "/companies({company})/customers({customer})/shipToAddresses",
+      "enabled": false
+    },
+    {
+      "type": "WebOrderCreate",
+      "endpoint": "/companies({company})/quicksalesheaders",
+      "enabled": true
+    },
+    {
+      "type": "GetInvoiceDetails",
+      "endpoint": "/companies({company})/salesInvoiceHeaders?$expand=salesInvoiceLines\u0026$filter=customerNumber eq \u0027{customer}\u0027",
+      "enabled": false
+    },
+    {
+      "type": "GetCreMemoDetails",
+      "endpoint": "/companies({company})/salesCrMemoHeaders?$expand=salesCrMemoLines\u0026$filter=customerNumber eq \u0027{customer}\u0027",
+      "enabled": false
+    },
+    {
+      "type": "CustomerHistory",
+      "endpoint": "/companies({company})/customers({customer})/combCustomerLedgerEntries",
+      "enabled": true
+    },
+    {
+      "type": "OrderStatus",
+      "endpoint": "/companies({company})/orderStatusHeaders?$expand=orderStatusLines($expand=orderStatusLineTrackings)",
+      "enabled": true
+    }
+  ],
+  "companies": [
+    {
+      "name": "Quelle",
+      "guid": "B7693FC2-78D2-EF11-BF43-000D3ABA6479",
+      "enabled": true,
+      "rpm": {
+        "EmailSearch": 50,
+        "PMCSearch": 50,
+        "CustomerCreate": 100,
+        "CreateShipToAddress": 100,
+        "WebOrderCreate": 100,
+        "GetInvoiceDetails": 100,
+        "GetCreMemoDetails": 100,
+        "CustomerHistory": 300,
+        "OrderStatus": 1500
+      },
+      "webOrderConfig": {
+        "minLines": 2,
+        "maxLines": 6,
+        "payloadPoolSize": 60000
+      }
+    },
+    {
+      "name": "Otto AT",
+      "guid": "25C66384-DB10-F111-BE79-7CED8D2D81EE",
+      "enabled": false,
+      "rpm": {
+        "EmailSearch": 1000,
+        "PMCSearch": 50,
+        "CustomerCreate": 10,
+        "CreateShipToAddress": 8,
+        "WebOrderCreate": 10,
+        "GetInvoiceDetails": 50,
+        "GetCreMemoDetails": 20,
+        "CustomerHistory": 300,
+        "OrderStatus": 0
+      },
+      "webOrderConfig": {
+        "minLines": 1,
+        "maxLines": 3,
+        "payloadPoolSize": 2000
+      }
+    },
+    {
+      "name": "Ackermann",
+      "guid": "75D67C87-70CC-F011-BF6B-000D3ABA6479",
+      "enabled": false,
+      "rpm": {
+        "EmailSearch": 50,
+        "PMCSearch": 25,
+        "CustomerCreate": 10,
+        "CreateShipToAddress": 5,
+        "WebOrderCreate": 5,
+        "GetInvoiceDetails": 0,
+        "GetCreMemoDetails": 0,
+        "CustomerHistory": 300,
+        "OrderStatus": 0
+      },
+      "webOrderConfig": {
+        "minLines": 2,
+        "maxLines": 3,
+        "payloadPoolSize": 60000
+      }
+    },
+    {
+      "name": "Jelmoli CH",
+      "guid": "89A7169A-DB10-F111-BE79-7CED8D2D81EE",
+      "enabled": false,
+      "rpm": {
+        "EmailSearch": 50,
+        "PMCSearch": 25,
+        "CustomerCreate": 10,
+        "CreateShipToAddress": 5,
+        "WebOrderCreate": 5,
+        "GetInvoiceDetails": 0,
+        "GetCreMemoDetails": 0,
+        "CustomerHistory": 300,
+        "OrderStatus": 0
+      },
+      "webOrderConfig": {
+        "minLines": 2,
+        "maxLines": 3,
+        "payloadPoolSize": 60000
+      }
+    },
+    {
+      "name": "Universal AT",
+      "guid": "A2FD853E-DA10-F111-BE79-7CED8D2D81EE",
+      "enabled": false,
+      "rpm": {
+        "EmailSearch": 50,
+        "PMCSearch": 25,
+        "CustomerCreate": 10,
+        "CreateShipToAddress": 5,
+        "WebOrderCreate": 5,
+        "GetInvoiceDetails": 0,
+        "GetCreMemoDetails": 0,
+        "CustomerHistory": 300,
+        "OrderStatus": 0
+      },
+      "webOrderConfig": {
+        "minLines": 2,
+        "maxLines": 3,
+        "payloadPoolSize": 60000
+      }
+    },
+    {
+      "name": "Baur DE",
+      "guid": "198ED272-D110-F111-BE79-7CED8D2D81EE",
+      "enabled": false,
+      "rpm": {
+        "EmailSearch": 50,
+        "PMCSearch": 25,
+        "CustomerCreate": 10,
+        "CreateShipToAddress": 5,
+        "WebOrderCreate": 5,
+        "GetInvoiceDetails": 0,
+        "GetCreMemoDetails": 0,
+        "CustomerHistory": 300,
+        "OrderStatus": 0
+      },
+      "webOrderConfig": {
+        "minLines": 2,
+        "maxLines": 3,
+        "payloadPoolSize": 60000
+      }
+    }
+  ]
+}
