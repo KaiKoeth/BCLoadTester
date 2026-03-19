@@ -1,16 +1,17 @@
-namespace BCLoadtester.Loadtest;
-
+using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Threading;
+
+namespace BCLoadtester.Loadtest;
 
 public class WebOrderPayloadPool
 {
-    private readonly List<string> _payloads;
+    private readonly List<string> _payloads; // 🔥 bleibt für Random
+    private readonly ConcurrentQueue<string> _queue; // 🔥 neu für echten Verbrauch
 
     private static readonly JsonSerializerOptions _jsonOptions =
         new(JsonSerializerDefaults.Web);
 
-    public int Count => _payloads.Count;
+    public int Count => _queue.Count; // 🔥 jetzt echter Live-Wert
 
     public WebOrderPayloadPool(
         string companyName,
@@ -26,16 +27,40 @@ public class WebOrderPayloadPool
             throw new Exception($"{companyName}: RandomProfile contains no items");
 
         _payloads = new List<string>(size);
+        _queue = new ConcurrentQueue<string>();
 
         for (int i = 0; i < size; i++)
         {
-            _payloads.Add(CreatePayload(profile, minLines, maxLines));
+            var payload = CreatePayload(profile, minLines, maxLines);
+
+            _payloads.Add(payload);   // 🔹 für Random
+            _queue.Enqueue(payload); // 🔹 für Dequeue
         }
     }
 
+    // =========================
+    // 🔹 ALT (BLEIBT)
+    // =========================
     public string GetRandom()
     {
         return _payloads[Random.Shared.Next(_payloads.Count)];
+    }
+
+    // =========================
+    // 🔥 NEU: echter Verbrauch
+    // =========================
+    public bool TryGet(out string payload)
+    {
+        return _queue.TryDequeue(out payload);
+    }
+
+    // =========================
+    // 🔁 OPTIONAL: Refill (für später)
+    // =========================
+    public void Refill(IEnumerable<string> items)
+    {
+        foreach (var item in items)
+            _queue.Enqueue(item);
     }
 
     private static string CreatePayload(
@@ -69,11 +94,9 @@ public class WebOrderPayloadPool
             });
         }
 
-        // 🔥 UNIQUE ID (20 Zeichen safe)
-
         var payload = new
         {
-            externalReferenceNo ="",
+            externalReferenceNo = "",
             externalDocumentNo = "",
             basketId = "",
             shopOrderNumber = "",

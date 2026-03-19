@@ -25,6 +25,8 @@ public partial class LoadTestDashboard : Form
     Label lblTotalErrors;
     Label lblStatus;
     ProgressBar progressLoading;
+    private const int PoolWarningThreshold = 500;
+    private const int PoolCriticalThreshold = 250;
 
     private List<DashboardRow> _allRows = new();
     private List<DashboardRow> _visibleRows = new();
@@ -87,8 +89,8 @@ public partial class LoadTestDashboard : Form
             btnLoad = new Button { Text = "📥 Load Data", Width = 120 };
             btnShowData = new Button { Text = "📊 Show Data", Width = 120 };
 
-            btnStart = new Button { Text = "▶ Start", Width = 120,Height = 60, BackColor = Color.LightGreen };
-            btnStop = new Button { Text = "■ Stop", Width = 120, Height = 60, BackColor = Color.IndianRed };
+            btnStart = new Button { Text = "▶ Start", Width = 120,Height = 50, BackColor = Color.LightGreen };
+            btnStop = new Button { Text = "■ Stop", Width = 120, Height = 50, BackColor = Color.IndianRed };
 
             btnStart.Enabled = false;
             btnStop.Enabled = false;
@@ -285,8 +287,8 @@ public partial class LoadTestDashboard : Form
             layout.Controls.Add(topBar1, 0, 0);
             layout.Controls.Add(topBar2, 0, 1);
             layout.Controls.Add(topBar3, 0, 2);
-            layout.Controls.Add(statsBar, 0, 2);
-            layout.Controls.Add(statsGrid, 0, 3);
+            layout.Controls.Add(statsBar, 0, 3);
+            layout.Controls.Add(statsGrid, 0, 4);
 
             // =========================
             // 🔷 TIMER (UNVERÄNDERT)
@@ -684,25 +686,36 @@ public partial class LoadTestDashboard : Form
                         displayWorker += $" (x{count})";
                     }
 
-                    // ✅ Pool anzeigen
-                    if (w.Worker == "OrderStatus" && w.PoolSize > 0)
+                    // ✅ Pool anzeigen (bestehendes Verhalten bleibt)
+                    if ((w.Worker == "OrderStatus" || w.Worker == "WebOrderCreate") && w.PoolSize > 0)
                     {
-                        displayWorker += $" ({w.PoolSize})";
+                        string poolText = $" ({w.PoolSize})";
+
+                        // 🔥 NEU: Warnlevel
+                        if (w.Worker == "WebOrderCreate")
+                        {
+                            if (w.PoolSize < PoolCriticalThreshold)
+                                poolText = $" 🔴{poolText}";
+                            else if (w.PoolSize < PoolWarningThreshold)
+                                poolText = $" ⚠{poolText}";
+                        }
+
+                        displayWorker += poolText;
                     }
 
-                    _allRows.Add(new DashboardRow
+                   _allRows.Add(new DashboardRow
                     {
                         Company = companyName,
-
-                        // 🔥 CLEAN KEY (für Stats!)
                         Worker = w.Worker,
-
-                        // 🔥 NUR Anzeige
                         DisplayWorker = displayWorker,
-
                         IsGroup = false,
 
-                        RPM = ExtractTotalRpm(w.Worker, w.Rpm),
+                        RPM = w.Rpm * (
+                            _workerCounts.TryGetValue((companyName, w.Worker), out count)
+                                ? count
+                                : 1
+                        ),
+
                         Requests = w.Requests,
                         Errors = w.Errors,
                         AvgMs = w.AvgMs,
@@ -782,6 +795,24 @@ public partial class LoadTestDashboard : Form
 
             var errorCell = statsGrid.Rows[rowIndex].Cells[4];
             errorCell.Style.ForeColor = row.Errors > 0 ? Color.Red : Color.Black;
+
+            // 🔥 Pool-Warnung (nur WebOrderCreate)
+            var lowPool = _visibleRows
+                .Where(r => !r.IsGroup && r.Worker == "WebOrderCreate")
+                .Select(r =>
+                {
+                    var pool = ExtractPoolSize(r.DisplayWorker);
+                    return new { r.Company, r.Worker, Pool = pool };
+                })
+                .Where(x => x.Pool < PoolWarningThreshold)
+                .OrderBy(x => x.Pool)
+                .FirstOrDefault();
+
+            if (lowPool != null)
+            {
+                lblStatus.Text = $"⚠ Pool low: {lowPool.Company} ({lowPool.Pool})";
+                lblStatus.ForeColor = Color.DarkOrange;
+            }
         }
 
         lblTotalRps.Text = $"Total RPS: {totalRps:0.00}";
@@ -1038,6 +1069,25 @@ public partial class LoadTestDashboard : Form
             MessageBox.Show($"API connection failed:\n{ex.Message}", "Error");
             return false;
         }
+    }
+
+    private int ExtractPoolSize(string workerDisplay)
+    {
+        if (string.IsNullOrWhiteSpace(workerDisplay))
+            return int.MaxValue;
+
+        var start = workerDisplay.LastIndexOf("(");
+        var end = workerDisplay.LastIndexOf(")");
+
+        if (start >= 0 && end > start)
+        {
+            var number = workerDisplay.Substring(start + 1, end - start - 1);
+
+            if (int.TryParse(number, out int value))
+                return value;
+        }
+
+        return int.MaxValue;
     }
 
     
