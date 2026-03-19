@@ -5,11 +5,12 @@ public class Company
     public bool enabled{ get; set; }
 
     public Dictionary<string, int> rpm { get; set; }
-    public class WebOrderConfig
-    {
-        public int minLines { get; set; }
-        public int maxLines { get; set; }
-        public int WeborderPoolSize { get; set; } = 2000;
-    }
     public WebOrderConfig webOrderConfig { get; set; }
+}
+
+public class WebOrderConfig
+{
+    public int minLines { get; set; }
+    public int maxLines { get; set; }
+    public int WeborderPoolSize { get; set; } = 2000;
 }

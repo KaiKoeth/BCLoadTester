@@ -1,6 +1,7 @@
 namespace BCLoadtester;
 using BCLoadtester.Loadtest;
 using System.Linq;
+using BCLoadtester.config;
 
 public partial class LoadTestDashboard : Form
 {
@@ -67,7 +68,9 @@ public partial class LoadTestDashboard : Form
                 ColumnCount = 1
             };
 
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60)); // TopBar
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50)); // TopBar 1
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50)); // TopBar 2
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35)); // TopBar3
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40)); // StatsBar
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Grid
 
@@ -76,29 +79,58 @@ public partial class LoadTestDashboard : Form
             // =========================
             // 🔷 TOP BAR
             // =========================
-            var topBar = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(10),
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false
-            };
-
-            btnSetup = new Button { Text = "⚙ Setup", Width = 110 };
+            
+            // =========================
+            // 🔷 BUTTONS (ZUERST ERZEUGEN!)
+            // =========================
+            btnSetup = new Button { Text = "⚙ Setup", Width = 120 };
             btnLoad = new Button { Text = "📥 Load Data", Width = 120 };
             btnShowData = new Button { Text = "📊 Show Data", Width = 120 };
 
-            btnStart = new Button { Text = "▶ Start", Width = 100, BackColor = Color.LightGreen };
-            btnStop = new Button { Text = "■ Stop", Width = 100, BackColor = Color.IndianRed };
+            btnStart = new Button { Text = "▶ Start", Width = 120,Height = 60, BackColor = Color.LightGreen };
+            btnStop = new Button { Text = "■ Stop", Width = 120, Height = 60, BackColor = Color.IndianRed };
 
             btnStart.Enabled = false;
             btnStop.Enabled = false;
 
+            // 🔥 MARGINS RESET → wichtig für perfekte Ausrichtung
+            btnSetup.Margin = new Padding(0, 0, 10, 0);
+            btnLoad.Margin = new Padding(0, 0, 10, 0);
+            btnShowData.Margin = new Padding(0, 0, 10, 0);
+
+            btnStart.Margin = new Padding(0, 0, 10, 0);
+            btnStop.Margin = new Padding(0, 0, 10, 0);
+
+            // =========================
+            // 🔷 EVENTS (🔥 WICHTIG!)
+            // =========================
+            btnStart.Click += btnStart_Click;
+            btnStop.Click += btnStop_Click;
+
+            btnSetup.Click += (s, e) =>
+            {
+                if (_config == null)
+                {
+                    MessageBox.Show("Config not loaded.");
+                    return;
+                }
+
+                new SetupSelectionForm(_config).ShowDialog(this);
+                ReloadConfig();
+            };
+
+            btnLoad.Click += async (s, e) => await LoadDataAsync();
+            btnShowData.Click += btnShowData_Click;
+
+            // =========================
+            // 🔷 STATUS
+            // =========================
             lblStatus = new Label
             {
                 Text = "Idle",
                 AutoSize = true,
-                Padding = new Padding(20, 10, 0, 0)
+                Padding = new Padding(20, 10, 0, 0),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold) // optional schöner
             };
 
             progressLoading = new ProgressBar
@@ -106,28 +138,97 @@ public partial class LoadTestDashboard : Form
                 Width = 150,
                 Visible = false
             };
+            // =========================
+            // 🔷 TOP BAR 1 (Load / Show links, Setup rechts)
+            // =========================
+            var topBar1 = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                Padding = new Padding(10, 10, 10, 0),
+                Margin = new Padding(0)
+            };
 
-            // Events (UNVERÄNDERT)
-            btnStart.Click += btnStart_Click;
-            btnStop.Click += btnStop_Click;
-            btnSetup.Click += (s, e) => new SetupForm(_config).ShowDialog(this);
-            btnLoad.Click += async (s, e) => await LoadDataAsync();
-            btnShowData.Click += btnShowData_Click;
+            topBar1.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            topBar1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            topBar1.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            topBar.Controls.Add(btnSetup);
-            topBar.Controls.Add(btnLoad);
-            topBar.Controls.Add(btnShowData);
+            // 🔹 Linke Seite (Load + Show)
+            var leftPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
 
-            topBar.Controls.Add(new Label { Width = 40 });
+            btnLoad.Margin = new Padding(0, 0, 10, 0);
+            btnShowData.Margin = new Padding(0);
 
-            topBar.Controls.Add(btnStart);
-            topBar.Controls.Add(btnStop);
+            leftPanel.Controls.Add(btnLoad);
+            leftPanel.Controls.Add(btnShowData);
 
-            topBar.Controls.Add(new Label { Width = 40 });
+            // 🔹 Setup rechts
+            btnSetup.Margin = new Padding(0);
 
-            topBar.Controls.Add(lblStatus);
-            topBar.Controls.Add(progressLoading);
+            // 🔹 Einfügen
+            topBar1.Controls.Add(leftPanel, 0, 0);
+            topBar1.Controls.Add(new Panel(), 1, 0);
+            topBar1.Controls.Add(btnSetup, 2, 0);
 
+
+            // =========================
+            // 🔷 TOP BAR 2 (Start/Stop links)
+            // =========================
+            var topBar2 = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Padding = new Padding(10, 0, 10, 0),
+                Margin = new Padding(0)
+            };
+
+            topBar2.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            topBar2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            // 🔹 Linke Seite (Start/Stop)
+            var leftPanel2 = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
+
+            btnStart.Margin = new Padding(0, 0, 10, 0);
+            btnStop.Margin = new Padding(0);
+
+            leftPanel2.Controls.Add(btnStart);
+            leftPanel2.Controls.Add(btnStop);
+
+            topBar2.Controls.Add(leftPanel2, 0, 0);
+
+
+            // =========================
+            // 🔷 TOP BAR 3 (Status links)
+            // =========================
+            var topBar3 = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(10, 0, 10, 0),
+                Margin = new Padding(0),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false
+            };
+
+            // 🔹 schöner Abstand
+            lblStatus.Margin = new Padding(0, 8, 10, 0);
+            progressLoading.Margin = new Padding(0, 8, 0, 0);
+
+            topBar3.Controls.Add(lblStatus);
+            topBar3.Controls.Add(progressLoading);
             // =========================
             // 🔷 KPI BAR
             // =========================
@@ -181,9 +282,11 @@ public partial class LoadTestDashboard : Form
             statsGrid.CellClick += statsGrid_CellClick;
 
             // 🔥 HIER IST DER FIX!
-            layout.Controls.Add(topBar, 0, 0);
-            layout.Controls.Add(statsBar, 0, 1);
-            layout.Controls.Add(statsGrid, 0, 2);
+            layout.Controls.Add(topBar1, 0, 0);
+            layout.Controls.Add(topBar2, 0, 1);
+            layout.Controls.Add(topBar3, 0, 2);
+            layout.Controls.Add(statsBar, 0, 2);
+            layout.Controls.Add(statsGrid, 0, 3);
 
             // =========================
             // 🔷 TIMER (UNVERÄNDERT)
@@ -214,6 +317,24 @@ public partial class LoadTestDashboard : Form
         if (_config == null || _customersCache.Count == 0)
         {
             MessageBox.Show("Please load data first.");
+            return;
+        }
+
+        // 🔥 Pre-Check
+        lblStatus.Text = "Testing connections...";
+        lblStatus.ForeColor = Color.DarkOrange;
+
+        if (!await TestSqlConnectionAsync())
+        {
+            lblStatus.Text = "SQL connection failed";
+            lblStatus.ForeColor = Color.Red;
+            return;
+        }
+
+        if (!await TestApiConnectionAsync())
+        {
+            lblStatus.Text = "API connection failed";
+            lblStatus.ForeColor = Color.Red;
             return;
         }
         SetUiState(true);
@@ -418,6 +539,24 @@ public partial class LoadTestDashboard : Form
     {
         if (_config == null)
             return;
+
+        // 🔥 Pre-Check
+        lblStatus.Text = "Testing connections...";
+        lblStatus.ForeColor = Color.DarkOrange;
+
+        if (!await TestSqlConnectionAsync())
+        {
+            lblStatus.Text = "SQL connection failed";
+            lblStatus.ForeColor = Color.Red;
+            return;
+        }
+
+        if (!await TestApiConnectionAsync())
+        {
+            lblStatus.Text = "API connection failed";
+            lblStatus.ForeColor = Color.Red;
+            return;
+        }
 
         try
         {
@@ -810,4 +949,96 @@ public partial class LoadTestDashboard : Form
 
         return 1;
     }
+
+    private void ReloadConfig()
+    {
+        try
+        {
+            _config = ConfigLoader.Load();
+
+            // 🔥 HttpClient neu erstellen (EXTREM wichtig!)
+            _client = new HttpClient(new SocketsHttpHandler
+            {
+                MaxConnectionsPerServer = _config.maxConnectionsPerServer,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                EnableMultipleHttp2Connections = true
+            });
+
+            // 🔥 Caches leeren (DB / Port könnte sich geändert haben!)
+            _customersCache.Clear();
+            _invoiceCustomerNoCache.Clear();
+            _creditMemoCustomerNoCache.Clear();
+            _orderStatusCache.Clear();
+            _webOrderPoolCache.Clear();
+
+            // 🔥 UI reset
+            btnStart.Enabled = false;
+
+            lblStatus.Text = "Config reloaded - reload data required";
+            lblStatus.ForeColor = Color.DarkOrange;
+        }
+        catch (Exception ex)
+        {
+            lblStatus.Text = "Config reload failed";
+            lblStatus.ForeColor = Color.Red;
+
+            MessageBox.Show(ex.Message, "Reload Error");
+        }
+    }
+
+    private async Task<bool> TestSqlConnectionAsync()
+    {
+        try
+        {
+            var connString = _config.connectionString + "Connection Timeout=3;";
+
+            using var conn = new Microsoft.Data.SqlClient.SqlConnection(connString);
+            await conn.OpenAsync();
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"SQL connection failed:\n{ex.Message}", "Error");
+            return false;
+        }
+    }
+
+    private async Task<bool> TestApiConnectionAsync()
+    {
+        try
+        {
+            using var client = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(5)
+            };
+
+            var url = _config.serviceRoot.TrimEnd('/') + _config.apiRoot;
+
+            var auth = Convert.ToBase64String(
+                System.Text.Encoding.ASCII.GetBytes($"{_config.username}:{_config.password}")
+            );
+
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", auth);
+
+            var response = await client.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                MessageBox.Show($"API responded with {response.StatusCode}", "Warning");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"API connection failed:\n{ex.Message}", "Error");
+            return false;
+        }
+    }
+
+    
 }
