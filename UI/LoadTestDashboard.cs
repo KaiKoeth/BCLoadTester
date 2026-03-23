@@ -544,13 +544,45 @@ public partial class LoadTestDashboard : Form
         lblStatus.Text = "Test running";
     }
 
-    private void btnStop_Click(object sender, EventArgs e)
+    private async void btnStop_Click(object sender, EventArgs e)
     {
-        _stopTime = DateTime.Now;
-        _controller?.Stop();
-        lblStatus.Text = "Test stopped";
-        lblStopTime.Text = $"Stop: {_stopTime:HH:mm:ss}";
-        SetUiState(false);
+        try
+        {
+            _stopTime = DateTime.Now;
+
+            _controller?.Stop();
+
+            lblStopTime.Text = $"Stop: {_stopTime:HH:mm:ss}";
+
+            // 🔥 UI sofort deaktivieren (kein Doppel-Stop möglich)
+            btnStop.Enabled = false;
+
+            // 🔥 Status: Speichern läuft
+            lblStatus.Text = "Saving results...";
+            lblStatus.ForeColor = Color.DarkOrange;
+
+            progressLoading.Visible = true;
+            progressLoading.Style = ProgressBarStyle.Marquee;
+            progressLoading.MarqueeAnimationSpeed = 30;
+
+            // =========================
+            // 💾 SAVE
+            // =========================
+            await SaveResultsToDatabaseAsync();
+
+            progressLoading.Visible = false;
+
+            // 🔥 UI zurücksetzen
+            SetUiState(false);
+
+            lblStatus.Text = "Test stopped";
+            lblStatus.ForeColor = Color.Black;
+        }
+        catch (Exception ex)
+        {
+            progressLoading.Visible = false; // 🔥 safety
+            MessageBox.Show($"Fehler beim Stop:\n{ex.Message}", "Error");
+        }
     }
 
     private async void InitializeApp()
@@ -1179,5 +1211,103 @@ public partial class LoadTestDashboard : Form
             }
         }
 
+        private async Task SaveResultsToDatabaseAsync()
+        {
+            if (_config == null)
+                return;
+
+            try
+            {
+                var connectionString =
+                    $"Server={_config.sqlServer},{_config.sqlPort};" +
+                    $"Database={_config.database};" +
+                    $"User Id={_config.dbUser};" +
+                    $"Password={_config.dbPassword};" +
+                    $"TrustServerCertificate=True;";
+
+                using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                // =========================
+                // 🔥 TABLE NAME (DYNAMIC)
+                // =========================
+                var tableName = string.IsNullOrWhiteSpace(_config.loadTestTableName)
+                    ? "BC_Loadtest"
+                    : _config.loadTestTableName.Trim();
+
+                // 🔒 Minimaler Schutz
+                tableName = tableName.Replace("[", "").Replace("]", "");
+
+                // =========================
+                // 🔥 CREATE TABLE IF NOT EXISTS
+                // =========================
+                var createCmd = conn.CreateCommand();
+                createCmd.CommandText = $@"
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
+        BEGIN
+            CREATE TABLE [{tableName}](
+                [Id] INT IDENTITY(1,1) PRIMARY KEY,
+                [Timestamp] DATETIME2,
+                [StartTime] DATETIME2,
+                [StopTime] DATETIME2,
+                [Company] NVARCHAR(100),
+                [Worker] NVARCHAR(100),
+                [RPM] BIGINT,
+                [Requests] BIGINT,
+                [Errors] BIGINT,
+                [RPS] FLOAT,
+                [AvgMs] FLOAT,
+                [MaxMs] BIGINT,
+                [PoolSize] INT,
+                [BigOrders] BIGINT
+            )
+        END";
+
+                await createCmd.ExecuteNonQueryAsync();
+
+                // =========================
+                // 🔥 INSERT DATA
+                // =========================
+                var stats = _stats.GetStats().ToList();
+
+                int inserted = 0;
+
+                foreach (var s in stats)
+                {
+                    var cmd = conn.CreateCommand();
+                    cmd.CommandText = $@"
+        INSERT INTO [{tableName}]
+        ([Timestamp],[StartTime],[StopTime],[Company],[Worker],[RPM],[Requests],[Errors],[RPS],[AvgMs],[MaxMs],[PoolSize],[BigOrders])
+        VALUES
+        (@ts,@start,@stop,@company,@worker,@rpm,@req,@err,@rps,@avg,@max,@pool,@big)";
+
+                    cmd.Parameters.AddWithValue("@ts", DateTime.UtcNow);
+                    cmd.Parameters.AddWithValue("@start", _startTime ?? DateTime.UtcNow);
+                    cmd.Parameters.AddWithValue("@stop", _stopTime ?? DateTime.UtcNow);
+                    cmd.Parameters.AddWithValue("@company", s.Company);
+                    cmd.Parameters.AddWithValue("@worker", s.Worker);
+                    cmd.Parameters.AddWithValue("@rpm", s.Rpm);
+                    cmd.Parameters.AddWithValue("@req", s.Requests);
+                    cmd.Parameters.AddWithValue("@err", s.Errors);
+                    cmd.Parameters.AddWithValue("@rps", s.Rps);
+                    cmd.Parameters.AddWithValue("@avg", s.AvgMs);
+                    cmd.Parameters.AddWithValue("@max", s.MaxMs);
+                    cmd.Parameters.AddWithValue("@pool", s.PoolSize);
+
+                    // 🔥 BigOrders aus custom metrics
+                    var bigOrders = _stats.GetCustomMetric(s.Worker, s.Company, "BigOrders");
+                    cmd.Parameters.AddWithValue("@big", bigOrders);
+
+                    await cmd.ExecuteNonQueryAsync();
+                    inserted++;
+                }
+
+                MessageBox.Show($"{inserted} Zeilen in [{tableName}] protokolliert", "Save Results");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Fehler beim Speichern:\n{ex.Message}", "DB Error");
+            }
+        }
     
 }

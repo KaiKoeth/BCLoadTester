@@ -19,6 +19,8 @@ public class AppConfig
     public List<WorkerConfig> workers { get; set; }
     public List<Company> companies { get; set; } = new();
 
+    public string loadTestTableName { get; set; } = "BC_Loadtest";
+
     public string BuildConnectionString()
     {
         return $"Server={sqlServer},{sqlPort};Database={database};User Id={dbUser};Password={dbPassword};TrustServerCertificate=True;";

@@ -17,6 +17,7 @@ public class ConnectionSetupForm : Form
     private TextBox txtSqlServer;
     private TextBox txtSqlPort;
     private TextBox txtDatabase;
+    private TextBox txtLoadTestTable;
 
     private bool _isDirty = false;
 
@@ -42,7 +43,7 @@ public class ConnectionSetupForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 8; i++)
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
 
         txtServiceRoot = new TextBox { Text = _config.serviceRoot, Dock = DockStyle.Fill };
@@ -53,6 +54,8 @@ public class ConnectionSetupForm : Form
         txtSqlServer = new TextBox { Text = _config.sqlServer, Dock = DockStyle.Fill };
         txtSqlPort = new TextBox { Text = _config.sqlPort.ToString(), Dock = DockStyle.Fill };
         txtDatabase = new TextBox { Text = _config.database, Dock = DockStyle.Fill };
+
+        txtLoadTestTable = new TextBox { Text = _config.loadTestTableName, Dock = DockStyle.Fill };
 
         // 🔥 Dirty Tracking
         txtServiceRoot.TextChanged += (s, e) => MarkDirty();
@@ -83,6 +86,9 @@ public class ConnectionSetupForm : Form
 
         layout.Controls.Add(new Label { Text = "Database" }, 0, 6);
         layout.Controls.Add(txtDatabase, 1, 6);
+
+        layout.Controls.Add(new Label { Text = "LoadTest Table" }, 0, 7);
+        layout.Controls.Add(txtLoadTestTable, 1, 7);
 
         // 🔥 Buttons (kein Save mehr!)
         var buttonPanel = new FlowLayoutPanel
@@ -155,7 +161,8 @@ public class ConnectionSetupForm : Form
         _config.sqlServer = txtSqlServer.Text;
         _config.sqlPort = int.Parse(txtSqlPort.Text);
         _config.database = txtDatabase.Text;
-
+        _config.loadTestTableName = txtLoadTestTable.Text;
+        
         ConfigLoader.Save(_config);
 
         _isDirty = false;
