@@ -1,7 +1,10 @@
 namespace BCLoadtester;
+
 using BCLoadtester.Loadtest;
 using System.Linq;
 using BCLoadtester.config;
+using System.Diagnostics;
+
 
 public partial class LoadTestDashboard : Form
 {
@@ -27,6 +30,10 @@ public partial class LoadTestDashboard : Form
     ProgressBar progressLoading;
     private const int PoolWarningThreshold = 500;
     private const int PoolCriticalThreshold = 250;
+
+    private PerformanceCounter _cpuCounter;
+    private Process _process;
+    private System.Windows.Forms.Timer _resourceTimer;
 
     private List<DashboardRow> _allRows = new();
     private List<DashboardRow> _visibleRows = new();
@@ -56,6 +63,27 @@ public partial class LoadTestDashboard : Form
 
             InitializeComponent();
             InitializeApp();
+
+            _process = Process.GetCurrentProcess();
+
+            // CPU Counter (gesamt → wir rechnen runter)
+            _cpuCounter = new PerformanceCounter(
+                "Process",
+                "% Processor Time",
+                _process.ProcessName,
+                true
+            );
+
+            // erster Call liefert 0 → warmup
+            _cpuCounter.NextValue();
+
+            _resourceTimer = new System.Windows.Forms.Timer
+            {
+                Interval = 1000
+            };
+
+            _resourceTimer.Tick += (s, e) => UpdateResourceUsage();
+            _resourceTimer.Start();
 
             this.MinimumSize = new Size(1000, 600);
             this.Size = new Size(1300, 800);
@@ -1120,6 +1148,30 @@ public partial class LoadTestDashboard : Form
             if (result != DialogResult.Yes)
             {
                 e.Cancel = true;
+            }
+        }
+
+        private void UpdateResourceUsage()
+        {
+            try
+            {
+                // 🧠 RAM (MB)
+                double ramMb = _process.WorkingSet64 / 1024.0 / 1024.0;
+
+                // ⚙️ CPU (%)
+                double cpu = _cpuCounter.NextValue() / Environment.ProcessorCount;
+
+                // 🌐 Netzwerk (optional simpel: Requests/sec als Proxy)
+                var stats = _stats.GetStats();
+                double rps = stats.Sum(s => s.Rps);
+
+                // 🔥 Anzeige im Titel
+                this.Text =
+                    $"BC LoadTester | CPU: {cpu:0.0}% | RAM: {ramMb:0} MB | RPS: {rps:0.0}";
+            }
+            catch
+            {
+                // ignore (PerformanceCounter kann selten zicken)
             }
         }
 
