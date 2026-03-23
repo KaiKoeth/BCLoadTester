@@ -9,7 +9,7 @@ public class CompanySetupForm : Form
 {
     private AppConfig _config;
     private DataGridView grid;
-    private Button btnSave;
+    private bool _isDirty = false;
 
     public CompanySetupForm(AppConfig config)
     {
@@ -19,6 +19,9 @@ public class CompanySetupForm : Form
         Width = 1400;
         Height = 700;
         StartPosition = FormStartPosition.CenterParent;
+
+        // 🔥 FormClosing (NEU)
+        this.FormClosing += CompanySetupForm_FormClosing;
 
         // 🔥 SAUBERES LAYOUT
         var layout = new TableLayoutPanel
@@ -39,16 +42,15 @@ public class CompanySetupForm : Form
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
         };
 
-        grid.ColumnHeaderMouseClick += Grid_HeaderClick;
-
-        // 🔹 SAVE BUTTON
-        btnSave = new Button
+        // 🔥 Dirty Tracking
+        grid.CellValueChanged += (s, e) => MarkDirty();
+        grid.CurrentCellDirtyStateChanged += (s, e) =>
         {
-            Text = "Save",
-            Dock = DockStyle.Fill
+            if (grid.IsCurrentCellDirty)
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
         };
 
-        btnSave.Click += (s, e) => SaveChanges();
+        grid.ColumnHeaderMouseClick += Grid_HeaderClick;
 
         // 🔥 Button Panel (unten)
         var bottomPanel = new FlowLayoutPanel
@@ -60,17 +62,13 @@ public class CompanySetupForm : Form
 
         var btnAdd = new Button { Text = "➕ Mandant neu", Width = 150 };
         var btnDelete = new Button { Text = "❌ Mandant löschen", Width = 170 };
-        btnSave = new Button { Text = "Save", Width = 100 };
 
         // Events
         btnAdd.Click += (s, e) => AddCompany();
         btnDelete.Click += (s, e) => DeleteCompany();
-        btnSave.Click += (s, e) => SaveChanges();
 
         bottomPanel.Controls.Add(btnAdd);
         bottomPanel.Controls.Add(btnDelete);
-        bottomPanel.Controls.Add(new Label { Width = 20 });
-        bottomPanel.Controls.Add(btnSave);
 
         // Layout
         layout.Controls.Add(grid, 0, 0);
@@ -81,6 +79,45 @@ public class CompanySetupForm : Form
         LoadCompanies();
     }
 
+    // =========================
+    // 🔥 DIRTY HANDLING
+    // =========================
+    void MarkDirty()
+    {
+        _isDirty = true;
+
+        if (!Text.EndsWith("*"))
+            Text += " *";
+    }
+
+    private void CompanySetupForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_isDirty)
+            return;
+
+        var result = MessageBox.Show(
+            "There are unsaved changes.\n\nDo you want to save them?",
+            "Save changes",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question
+        );
+
+        if (result == DialogResult.Cancel)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (result == DialogResult.Yes)
+        {
+            SaveChanges();
+        }
+        // No = schließen ohne speichern
+    }
+
+    // =========================
+    // 🔧 GRID SETUP
+    // =========================
     void BuildColumns()
     {
         grid.Columns.Clear();
@@ -146,6 +183,9 @@ public class CompanySetupForm : Form
         return 0;
     }
 
+    // =========================
+    // 🔧 SAVE
+    // =========================
     void SaveChanges()
     {
         grid.EndEdit();
@@ -166,7 +206,7 @@ public class CompanySetupForm : Form
                 colIndex++;
             }
 
-            // 🔥 WICHTIG: immer sicherstellen
+            // 🔥 FIX: immer sicherstellen
             if (company.webOrderConfig == null)
                 company.webOrderConfig = new WebOrderConfig();
 
@@ -182,7 +222,8 @@ public class CompanySetupForm : Form
 
         ConfigLoader.Save(_config);
 
-        Close();
+        _isDirty = false;
+        Text = "Company Setup";
     }
 
     void SetRpm(Company company, string worker, object value)
@@ -193,6 +234,9 @@ public class CompanySetupForm : Form
         company.rpm[worker] = Convert.ToInt32(value ?? 0);
     }
 
+    // =========================
+    // 🔧 HEADER CLICK
+    // =========================
     void Grid_HeaderClick(object sender, DataGridViewCellMouseEventArgs e)
     {
         if (e.RowIndex != -1)
@@ -210,9 +254,14 @@ public class CompanySetupForm : Form
 
             grid.Columns[e.ColumnIndex].HeaderText =
                 $"{(worker.enabled ? "☑" : "☐")} {worker.type}";
+
+            MarkDirty(); // 🔥 wichtig!
         }
     }
 
+    // =========================
+    // 🔧 ADD / DELETE
+    // =========================
     void AddCompany()
     {
         string name = Prompt("Mandant Name:");
@@ -237,7 +286,6 @@ public class CompanySetupForm : Form
             }
         };
 
-        // 🔥 alle Worker auf 0 setzen
         foreach (var w in _config.workers)
         {
             company.rpm[w.type] = 0;
@@ -246,6 +294,7 @@ public class CompanySetupForm : Form
         _config.companies.Add(company);
 
         LoadCompanies();
+        MarkDirty(); // 🔥 wichtig!
     }
 
     void DeleteCompany()
@@ -272,8 +321,12 @@ public class CompanySetupForm : Form
         _config.companies.RemoveAt(index);
 
         LoadCompanies();
+        MarkDirty(); // 🔥 wichtig!
     }
 
+    // =========================
+    // 🔧 PROMPT
+    // =========================
     string Prompt(string text)
     {
         var form = new Form

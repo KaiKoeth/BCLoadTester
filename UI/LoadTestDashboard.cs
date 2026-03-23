@@ -59,6 +59,7 @@ public partial class LoadTestDashboard : Form
 
             this.MinimumSize = new Size(1000, 600);
             this.Size = new Size(1300, 800);
+            this.FormClosing += LoadTestDashboard_FormClosing;
 
             // =========================
             // 🔷 MAIN LAYOUT (FIX!)
@@ -1088,7 +1089,39 @@ public partial class LoadTestDashboard : Form
         }
 
         return int.MaxValue;
-    }
+            }
+
+            private void LoadTestDashboard_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            bool isRunning = _controller != null && _stopTime == null;
+
+            // 🔥 1. Test läuft → NICHT beenden erlauben
+            if (isRunning)
+            {
+                MessageBox.Show(
+                    "A test is currently running.\n\nPlease stop the test before closing the application.",
+                    "Test running",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                e.Cancel = true;
+                return;
+            }
+
+            // 🔥 2. Kein Test → Sicherheitsabfrage
+            var result = MessageBox.Show(
+                "Do you really want to exit?",
+                "Exit",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question
+            );
+
+            if (result != DialogResult.Yes)
+            {
+                e.Cancel = true;
+            }
+        }
 
     
 }

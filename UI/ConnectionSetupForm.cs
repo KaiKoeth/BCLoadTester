@@ -18,6 +18,8 @@ public class ConnectionSetupForm : Form
     private TextBox txtSqlPort;
     private TextBox txtDatabase;
 
+    private bool _isDirty = false;
+
     public ConnectionSetupForm(AppConfig config)
     {
         _config = config;
@@ -26,6 +28,9 @@ public class ConnectionSetupForm : Form
         Width = 600;
         Height = 350;
         StartPosition = FormStartPosition.CenterParent;
+
+        // 🔥 FormClosing Hook
+        this.FormClosing += ConnectionSetupForm_FormClosing;
 
         var layout = new TableLayoutPanel
         {
@@ -49,6 +54,15 @@ public class ConnectionSetupForm : Form
         txtSqlPort = new TextBox { Text = _config.sqlPort.ToString(), Dock = DockStyle.Fill };
         txtDatabase = new TextBox { Text = _config.database, Dock = DockStyle.Fill };
 
+        // 🔥 Dirty Tracking
+        txtServiceRoot.TextChanged += (s, e) => MarkDirty();
+        txtApiRoot.TextChanged += (s, e) => MarkDirty();
+        txtUser.TextChanged += (s, e) => MarkDirty();
+        txtPassword.TextChanged += (s, e) => MarkDirty();
+        txtSqlServer.TextChanged += (s, e) => MarkDirty();
+        txtSqlPort.TextChanged += (s, e) => MarkDirty();
+        txtDatabase.TextChanged += (s, e) => MarkDirty();
+
         layout.Controls.Add(new Label { Text = "ServiceRoot" }, 0, 0);
         layout.Controls.Add(txtServiceRoot, 1, 0);
 
@@ -70,14 +84,7 @@ public class ConnectionSetupForm : Form
         layout.Controls.Add(new Label { Text = "Database" }, 0, 6);
         layout.Controls.Add(txtDatabase, 1, 6);
 
-        var btnSave = new Button
-        {
-            Text = "Save",
-            Dock = DockStyle.Bottom
-        };
-
-        btnSave.Click += (s, e) => Save();
-
+        // 🔥 Buttons (kein Save mehr!)
         var buttonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -92,7 +99,6 @@ public class ConnectionSetupForm : Form
         btnTestSql.Click += async (s, e) => await TestSqlConnection();
         btnTestApi.Click += async (s, e) => await TestApiConnection();
 
-        buttonPanel.Controls.Add(btnSave);
         buttonPanel.Controls.Add(btnTestApi);
         buttonPanel.Controls.Add(btnTestSql);
 
@@ -100,6 +106,45 @@ public class ConnectionSetupForm : Form
         Controls.Add(buttonPanel);
     }
 
+    // =========================
+    // 🔥 DIRTY HANDLING
+    // =========================
+    void MarkDirty()
+    {
+        _isDirty = true;
+
+        if (!Text.EndsWith("*"))
+            Text += " *";
+    }
+
+    private void ConnectionSetupForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_isDirty)
+            return;
+
+        var result = MessageBox.Show(
+            "There are unsaved changes.\n\nDo you want to save them?",
+            "Save changes",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question
+        );
+
+        if (result == DialogResult.Cancel)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (result == DialogResult.Yes)
+        {
+            Save();
+        }
+        // No = schließen ohne speichern
+    }
+
+    // =========================
+    // 🔧 SAVE (intern)
+    // =========================
     private void Save()
     {
         _config.serviceRoot = txtServiceRoot.Text;
@@ -113,8 +158,13 @@ public class ConnectionSetupForm : Form
 
         ConfigLoader.Save(_config);
 
-        Close();
+        _isDirty = false;
+        Text = "Connection Setup";
     }
+
+    // =========================
+    // 🔧 TEST SQL
+    // =========================
     private async Task TestSqlConnection()
     {
         try
@@ -138,6 +188,10 @@ public class ConnectionSetupForm : Form
             MessageBox.Show($"❌ SQL connection failed:\n{ex.Message}", "Error");
         }
     }
+
+    // =========================
+    // 🔧 TEST API
+    // =========================
     private async Task TestApiConnection()
     {
         try

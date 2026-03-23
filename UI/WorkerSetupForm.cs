@@ -6,7 +6,7 @@ public class WorkerSetupForm : Form
 {
     private AppConfig _config;
     private DataGridView grid;
-    private Button btnSave;
+    private bool _isDirty = false;
 
     public WorkerSetupForm(AppConfig config)
     {
@@ -17,12 +17,23 @@ public class WorkerSetupForm : Form
         Height = 500;
         StartPosition = FormStartPosition.CenterParent;
 
+        // 🔥 FormClosing Hook
+        this.FormClosing += WorkerSetupForm_FormClosing;
+
         grid = new DataGridView
         {
             Dock = DockStyle.Fill,
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
             RowHeadersVisible = false,
             AllowUserToAddRows = false
+        };
+
+        // 🔥 Dirty Tracking (wichtig für Checkbox + Text)
+        grid.CellValueChanged += (s, e) => MarkDirty();
+        grid.CurrentCellDirtyStateChanged += (s, e) =>
+        {
+            if (grid.IsCurrentCellDirty)
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
         };
 
         // Columns
@@ -40,19 +51,48 @@ public class WorkerSetupForm : Form
 
         LoadWorkers();
 
-        btnSave = new Button
-        {
-            Text = "Save",
-            Dock = DockStyle.Bottom,
-            Height = 40
-        };
-
-        btnSave.Click += (s, e) => Save();
-
         Controls.Add(grid);
-        Controls.Add(btnSave);
     }
 
+    // =========================
+    // 🔥 DIRTY HANDLING
+    // =========================
+    void MarkDirty()
+    {
+        _isDirty = true;
+
+        if (!Text.EndsWith("*"))
+            Text += " *";
+    }
+
+    private void WorkerSetupForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_isDirty)
+            return;
+
+        var result = MessageBox.Show(
+            "There are unsaved changes.\n\nDo you want to save them?",
+            "Save changes",
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question
+        );
+
+        if (result == DialogResult.Cancel)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (result == DialogResult.Yes)
+        {
+            Save();
+        }
+        // No = schließen ohne speichern
+    }
+
+    // =========================
+    // 🔧 LOAD
+    // =========================
     void LoadWorkers()
     {
         grid.Rows.Clear();
@@ -67,6 +107,9 @@ public class WorkerSetupForm : Form
         }
     }
 
+    // =========================
+    // 🔧 SAVE (intern)
+    // =========================
     void Save()
     {
         grid.EndEdit();
@@ -82,6 +125,7 @@ public class WorkerSetupForm : Form
 
         ConfigLoader.Save(_config);
 
-        Close();
+        _isDirty = false;
+        Text = "Worker Setup";
     }
 }
