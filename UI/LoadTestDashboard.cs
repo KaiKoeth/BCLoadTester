@@ -477,8 +477,12 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerKey));
-                                    break;
+                                    _stats,
+                                    workerKey,
+                                    company.webOrderConfig?.bigOrderLines ?? 0,
+                                    company.webOrderConfig?.bigOrderIntervalMinutes ?? 0
+                                ));
+                                break;
 
                             case "GetInvoiceDetails":
                                 if (invoiceCustomers.Count == 0) break;
@@ -716,20 +720,18 @@ public partial class LoadTestDashboard : Form
                     }
 
                     // ✅ Pool anzeigen (bestehendes Verhalten bleibt)
+                     // 🔥 Pool anzeigen (bestehendes Verhalten beibehalten)
                     if ((w.Worker == "OrderStatus" || w.Worker == "WebOrderCreate") && w.PoolSize > 0)
                     {
-                        string poolText = $" ({w.PoolSize})";
+                        displayWorker += $" ({w.PoolSize})";
+                    }
 
-                        // 🔥 NEU: Warnlevel
-                        if (w.Worker == "WebOrderCreate")
-                        {
-                            if (w.PoolSize < PoolCriticalThreshold)
-                                poolText = $" 🔴{poolText}";
-                            else if (w.PoolSize < PoolWarningThreshold)
-                                poolText = $" ⚠{poolText}";
-                        }
-
-                        displayWorker += poolText;
+                    // 🔥 NEU: BigOrders anzeigen (nur für WebOrder)
+                    if (w.Worker == "WebOrderCreate")
+                    {
+                        var bigOrders = _stats.GetCustomMetric(w.Worker, companyName, "BigOrders");
+                        displayWorker += $" [{bigOrders}]";
+                        
                     }
 
                    _allRows.Add(new DashboardRow
@@ -1156,7 +1158,9 @@ public partial class LoadTestDashboard : Form
             try
             {
                 // 🧠 RAM (MB)
-                double ramMb = _process.WorkingSet64 / 1024.0 / 1024.0;
+                _process.Refresh(); // 🔥 wichtig!
+
+                double ramMb = _process.PrivateMemorySize64 / 1024.0 / 1024.0;
 
                 // ⚙️ CPU (%)
                 double cpu = _cpuCounter.NextValue() / Environment.ProcessorCount;

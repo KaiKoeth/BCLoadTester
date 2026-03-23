@@ -26,8 +26,14 @@ public class Statistics
 
     private readonly ConcurrentDictionary<string, WorkerStats> _stats = new();
 
+    // 🔥 NEU: thread-safe custom metrics
+    private readonly ConcurrentDictionary<(string Worker, string Company, string Key), long> _customMetrics = new();
+
     private string BuildKey(string worker, string company)
         => $"{worker}|{company}";
+
+    private string NormalizeWorker(string worker)
+        => worker?.Trim() ?? "";
 
     // =========================
     // ✅ REQUEST
@@ -35,10 +41,10 @@ public class Statistics
     public void RequestSent(string worker, string company, long rpm)
     {
         worker = NormalizeWorker(worker);
+
         var key = BuildKey(worker, company);
         var stat = _stats.GetOrAdd(key, _ => new WorkerStats());
 
-        // 🔥 thread-safe RPM setzen
         if (stat.Rpm == 0)
             Interlocked.CompareExchange(ref stat.Rpm, rpm, 0);
 
@@ -53,12 +59,12 @@ public class Statistics
     public void Error(string worker, string company, string errorMessage)
     {
         worker = NormalizeWorker(worker);
+
         var key = BuildKey(worker, company);
         var stat = _stats.GetOrAdd(key, _ => new WorkerStats());
 
         Interlocked.Increment(ref stat.Errors);
 
-        // 🔥 Absicherung gegen null/leer
         if (string.IsNullOrWhiteSpace(errorMessage))
             errorMessage = "Unknown";
 
@@ -74,6 +80,7 @@ public class Statistics
     public Dictionary<string, long> GetErrors(string worker, string company)
     {
         worker = NormalizeWorker(worker);
+
         var key = BuildKey(worker, company);
 
         if (_stats.TryGetValue(key, out var stat))
@@ -97,8 +104,8 @@ public class Statistics
             var stat = kvp.Value;
 
             var separatorIndex = key.IndexOf('|');
-                if (separatorIndex <= 0)
-                    continue;
+            if (separatorIndex <= 0)
+                continue;
 
             var worker = key.Substring(0, separatorIndex);
             var company = key.Substring(separatorIndex + 1);
@@ -138,6 +145,7 @@ public class Statistics
     public void SetPoolSize(string worker, string company, int size)
     {
         worker = NormalizeWorker(worker);
+
         var key = BuildKey(worker, company);
         var stat = _stats.GetOrAdd(key, _ => new WorkerStats());
 
@@ -150,10 +158,11 @@ public class Statistics
     public void AddResponseTime(string worker, string company, long ms)
     {
         worker = NormalizeWorker(worker);
+
         var key = BuildKey(worker, company);
         var stat = _stats.GetOrAdd(key, _ => new WorkerStats());
 
-        lock (stat)
+        lock (stat) // bewusst beibehalten (Aggregationen!)
         {
             stat.ResponseTimes.Enqueue(ms);
 
@@ -167,10 +176,31 @@ public class Statistics
 
             while (stat.ResponseTimes.Count > 100)
                 stat.ResponseTimes.TryDequeue(out _);
-        } 
+        }
     }
-    private string NormalizeWorker(string worker)
+
+    // =========================
+    // 📈 CUSTOM METRICS (🔥 FIXED)
+    // =========================
+    public void IncrementCustomMetric(string worker, string company, string key)
     {
-        return worker?.Trim() ?? "";
+        worker = NormalizeWorker(worker);
+
+        var k = (worker, company, key);
+
+        _customMetrics.AddOrUpdate(
+            k,
+            1,
+            (_, current) => current + 1
+        );
+    }
+
+    public long GetCustomMetric(string worker, string company, string key)
+    {
+        worker = NormalizeWorker(worker);
+
+        var k = (worker, company, key);
+
+        return _customMetrics.TryGetValue(k, out var value) ? value : 0;
     }
 }

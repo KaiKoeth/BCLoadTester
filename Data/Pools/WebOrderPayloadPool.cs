@@ -1,17 +1,21 @@
-using System.Collections.Concurrent;
-using System.Text.Json;
-
 namespace BCLoadtester.Loadtest;
+
+using System.Text.Json;
+using System.Collections.Concurrent;
 
 public class WebOrderPayloadPool
 {
-    private readonly List<string> _payloads; // 🔥 bleibt für Random
-    private readonly ConcurrentQueue<string> _queue; // 🔥 neu für echten Verbrauch
+    private readonly ConcurrentQueue<string> _payloads = new();
+    private readonly WebOrderProfile _profile;
+
+    private readonly int _minLines;
+    private readonly int _maxLines;
 
     private static readonly JsonSerializerOptions _jsonOptions =
         new(JsonSerializerDefaults.Web);
 
-    public int Count => _queue.Count; // 🔥 jetzt echter Live-Wert
+    public int Count => _payloads.Count;
+    public int InitialSize { get; }
 
     public WebOrderPayloadPool(
         string companyName,
@@ -20,49 +24,78 @@ public class WebOrderPayloadPool
         int maxLines,
         int size)
     {
+        _profile = profile;
+        _minLines = minLines;
+        _maxLines = maxLines;
+        InitialSize = size;
+
         if (profile.Customers.Count == 0)
             throw new Exception($"{companyName}: RandomProfile contains no customers");
 
         if (profile.Items.Count == 0)
             throw new Exception($"{companyName}: RandomProfile contains no items");
 
-        _payloads = new List<string>(size);
-        _queue = new ConcurrentQueue<string>();
-
+        // 🔥 Initial Fill
         for (int i = 0; i < size; i++)
         {
-            var payload = CreatePayload(profile, minLines, maxLines);
-
-            _payloads.Add(payload);   // 🔹 für Random
-            _queue.Enqueue(payload); // 🔹 für Dequeue
+            _payloads.Enqueue(CreatePayload(_profile, _minLines, _maxLines));
         }
     }
 
     // =========================
-    // 🔹 ALT (BLEIBT)
-    // =========================
-    public string GetRandom()
-    {
-        return _payloads[Random.Shared.Next(_payloads.Count)];
-    }
-
-    // =========================
-    // 🔥 NEU: echter Verbrauch
+    // 🔹 NORMAL GET (dequeue)
     // =========================
     public bool TryGet(out string payload)
     {
-        return _queue.TryDequeue(out payload);
+        return _payloads.TryDequeue(out payload);
     }
 
     // =========================
-    // 🔁 OPTIONAL: Refill (für später)
+    // 🔹 FALLBACK (random)
     // =========================
-    public void Refill(IEnumerable<string> items)
+    public string GetRandom()
     {
-        foreach (var item in items)
-            _queue.Enqueue(item);
+        return CreatePayload(_profile, _minLines, _maxLines);
     }
 
+    // =========================
+    // 🔥 BIG ORDER
+    // =========================
+    public string CreateBigOrder(int lines)
+    {
+        if (lines <= 0)
+            return CreatePayload(_profile, _minLines, _maxLines);
+
+        var rnd = Random.Shared;
+
+        // 🔥 -10% bis 100%
+        int min = (int)(lines * 0.9);
+
+        if (min < 1)
+            min = 1;
+
+        int randomized = rnd.Next(min, lines + 1);
+
+        return CreatePayload(_profile, randomized, randomized);
+    }
+
+    // =========================
+    // 🔁 OPTIONAL REFILL
+    // =========================
+    public void RefillIfLow(int threshold = 1000, int refillAmount = 5000)
+    {
+        if (_payloads.Count > threshold)
+            return;
+
+        for (int i = 0; i < refillAmount; i++)
+        {
+            _payloads.Enqueue(CreatePayload(_profile, _minLines, _maxLines));
+        }
+    }
+
+    // =========================
+    // 🔧 CORE PAYLOAD BUILDER
+    // =========================
     private static string CreatePayload(
         WebOrderProfile profile,
         int minLines,
@@ -70,18 +103,15 @@ public class WebOrderPayloadPool
     {
         var rnd = Random.Shared;
 
-        var customer =
-            profile.Customers[rnd.Next(profile.Customers.Count)];
+        var customer = profile.Customers[rnd.Next(profile.Customers.Count)];
 
-        int lines =
-            rnd.Next(minLines, maxLines + 1);
+        int lines = rnd.Next(minLines, maxLines + 1);
 
         var quicksaleslines = new List<object>(lines);
 
         for (int i = 0; i < lines; i++)
         {
-            var item =
-                profile.Items[rnd.Next(profile.Items.Count)];
+            var item = profile.Items[rnd.Next(profile.Items.Count)];
 
             quicksaleslines.Add(new
             {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
+using System.Drawing;
 
 namespace BCLoadtester.config;
 
@@ -20,10 +21,8 @@ public class CompanySetupForm : Form
         Height = 700;
         StartPosition = FormStartPosition.CenterParent;
 
-        // 🔥 FormClosing (NEU)
         this.FormClosing += CompanySetupForm_FormClosing;
 
-        // 🔥 SAUBERES LAYOUT
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -33,7 +32,9 @@ public class CompanySetupForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
 
+        // =========================
         // 🔹 GRID
+        // =========================
         grid = new DataGridView
         {
             Dock = DockStyle.Fill,
@@ -42,8 +43,8 @@ public class CompanySetupForm : Form
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
         };
 
-        // 🔥 Dirty Tracking
         grid.CellValueChanged += (s, e) => MarkDirty();
+
         grid.CurrentCellDirtyStateChanged += (s, e) =>
         {
             if (grid.IsCurrentCellDirty)
@@ -51,8 +52,16 @@ public class CompanySetupForm : Form
         };
 
         grid.ColumnHeaderMouseClick += Grid_HeaderClick;
+        grid.CellDoubleClick += Grid_CellDoubleClick;
 
-        // 🔥 Button Panel (unten)
+        // 🔥 Tooltip + Cursor
+        grid.CellToolTipTextNeeded += Grid_CellToolTipTextNeeded;
+        grid.CellMouseEnter += Grid_CellMouseEnter;
+        grid.CellMouseLeave += (s, e) => grid.Cursor = Cursors.Default;
+
+        // =========================
+        // 🔹 BUTTONS
+        // =========================
         var bottomPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -63,16 +72,15 @@ public class CompanySetupForm : Form
         var btnAdd = new Button { Text = "➕ Mandant neu", Width = 150 };
         var btnDelete = new Button { Text = "❌ Mandant löschen", Width = 170 };
 
-        // Events
         btnAdd.Click += (s, e) => AddCompany();
         btnDelete.Click += (s, e) => DeleteCompany();
 
         bottomPanel.Controls.Add(btnAdd);
         bottomPanel.Controls.Add(btnDelete);
 
-        // Layout
         layout.Controls.Add(grid, 0, 0);
         layout.Controls.Add(bottomPanel, 0, 1);
+
         Controls.Add(layout);
 
         BuildColumns();
@@ -80,7 +88,7 @@ public class CompanySetupForm : Form
     }
 
     // =========================
-    // 🔥 DIRTY HANDLING
+    // 🔥 DIRTY
     // =========================
     void MarkDirty()
     {
@@ -112,11 +120,10 @@ public class CompanySetupForm : Form
         {
             SaveChanges();
         }
-        // No = schließen ohne speichern
     }
 
     // =========================
-    // 🔧 GRID SETUP
+    // 🔧 COLUMNS
     // =========================
     void BuildColumns()
     {
@@ -136,20 +143,21 @@ public class CompanySetupForm : Form
             var col = new DataGridViewTextBoxColumn
             {
                 Name = worker.type,
-                HeaderText = $"{(worker.enabled ? "☑" : "☐")} {worker.type}",
                 SortMode = DataGridViewColumnSortMode.NotSortable
             };
+
+            
+            col.HeaderText = $"{(worker.enabled ? "☑" : "☐")} {worker.type}";
 
             grid.Columns.Add(col);
         }
 
-        grid.Columns.Add("minLines", "MinLines");
-        grid.Columns.Add("maxLines", "MaxLines");
-        grid.Columns.Add("weborderPoolSize", "Weborder Pool");
-
         grid.Columns["company"].ReadOnly = true;
     }
 
+    // =========================
+    // 🔧 LOAD
+    // =========================
     void LoadCompanies()
     {
         grid.Rows.Clear();
@@ -164,12 +172,11 @@ public class CompanySetupForm : Form
 
             foreach (var worker in _config.workers)
             {
-                values.Add(GetRpm(c, worker.type));
+                if (worker.type == "WebOrderCreate" && c.webOrderConfig != null)
+                    values.Add($"{GetRpm(c, worker.type)} ⚙");
+                else
+                    values.Add(GetRpm(c, worker.type));
             }
-
-            values.Add(c.webOrderConfig?.minLines ?? 0);
-            values.Add(c.webOrderConfig?.maxLines ?? 0);
-            values.Add(c.webOrderConfig?.WeborderPoolSize ?? 0);
 
             grid.Rows.Add(values.ToArray());
         }
@@ -202,22 +209,15 @@ public class CompanySetupForm : Form
 
             foreach (var worker in _config.workers)
             {
-                SetRpm(company, worker.type, row.Cells[colIndex].Value);
+                var value = row.Cells[colIndex].Value?.ToString() ?? "0";
+                value = value.Replace("⚙", "").Trim();
+
+                SetRpm(company, worker.type, value);
                 colIndex++;
             }
 
-            // 🔥 FIX: immer sicherstellen
             if (company.webOrderConfig == null)
                 company.webOrderConfig = new WebOrderConfig();
-
-            company.webOrderConfig.minLines =
-                Convert.ToInt32(row.Cells[colIndex].Value ?? 0);
-
-            company.webOrderConfig.maxLines =
-                Convert.ToInt32(row.Cells[colIndex + 1].Value ?? 0);
-
-            company.webOrderConfig.WeborderPoolSize =
-                Convert.ToInt32(row.Cells[colIndex + 2].Value ?? 0);
         }
 
         ConfigLoader.Save(_config);
@@ -254,9 +254,74 @@ public class CompanySetupForm : Form
 
             grid.Columns[e.ColumnIndex].HeaderText =
                 $"{(worker.enabled ? "☑" : "☐")} {worker.type}";
+            
 
-            MarkDirty(); // 🔥 wichtig!
+            MarkDirty();
         }
+    }
+
+    // =========================
+    // 🔥 DRILLDOWN
+    // =========================
+    void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            return;
+
+        var column = grid.Columns[e.ColumnIndex];
+
+        if (column.Name != "WebOrderCreate")
+            return;
+
+        var company = _config.companies[e.RowIndex];
+
+        if (company.webOrderConfig == null)
+            company.webOrderConfig = new WebOrderConfig();
+
+        using var form = new WebOrderConfigForm(company.webOrderConfig);
+        form.ShowDialog(this);
+
+        MarkDirty();
+    }
+
+    // =========================
+    // 🔥 TOOLTIP
+    // =========================
+    void Grid_CellToolTipTextNeeded(object sender, DataGridViewCellToolTipTextNeededEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            return;
+
+        if (grid.Columns[e.ColumnIndex].Name != "WebOrderCreate")
+            return;
+
+        var company = _config.companies[e.RowIndex];
+        var cfg = company.webOrderConfig;
+
+        if (cfg == null)
+        {
+            e.ToolTipText = "No WebOrder config\nDouble click to edit";
+            return;
+        }
+
+        e.ToolTipText =
+            $"⚙ WebOrder Settings\n" +
+            $"Lines: {cfg.minLines}-{cfg.maxLines}\n" +
+            $"Pool: {cfg.WeborderPoolSize}\n" +
+            $"BigOrder: {cfg.bigOrderLines} / {cfg.bigOrderIntervalMinutes} min\n\n" +
+            $"Double click to edit";
+    }
+
+    // =========================
+    // 🔥 CURSOR
+    // =========================
+    void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            return;
+
+        if (grid.Columns[e.ColumnIndex].Name == "WebOrderCreate")
+            grid.Cursor = Cursors.Hand;
     }
 
     // =========================
@@ -282,7 +347,9 @@ public class CompanySetupForm : Form
             {
                 minLines = 1,
                 maxLines = 1,
-                WeborderPoolSize = 1000
+                WeborderPoolSize = 1000,
+                bigOrderLines = 0,
+                bigOrderIntervalMinutes = 0
             }
         };
 
@@ -294,7 +361,7 @@ public class CompanySetupForm : Form
         _config.companies.Add(company);
 
         LoadCompanies();
-        MarkDirty(); // 🔥 wichtig!
+        MarkDirty();
     }
 
     void DeleteCompany()
@@ -321,7 +388,7 @@ public class CompanySetupForm : Form
         _config.companies.RemoveAt(index);
 
         LoadCompanies();
-        MarkDirty(); // 🔥 wichtig!
+        MarkDirty();
     }
 
     // =========================

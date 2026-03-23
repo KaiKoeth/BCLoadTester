@@ -12,6 +12,12 @@ public class WebOrderCreateWorker : BaseWorker
     private readonly string _endpoint;
     private readonly string _companyId;
 
+    private readonly int _bigOrderLines;
+    private readonly int _bigOrderIntervalMinutes;
+
+    private DateTime _lastBigOrder = DateTime.MinValue;
+    private readonly object _bigOrderLock = new();
+
     private static int _counter = 0;
 
     public WebOrderCreateWorker(
@@ -25,7 +31,9 @@ public class WebOrderCreateWorker : BaseWorker
         string companyName,
         int rpm,
         Statistics stats,
-        string workerName)
+        string workerName,
+        int bigOrderLines = 0,
+        int bigOrderIntervalMinutes = 0)
         : base(client, stats, workerName, companyName, Math.Max(1, rpm))
     {
         _orderStatusPool = orderStatusPool;
@@ -34,72 +42,113 @@ public class WebOrderCreateWorker : BaseWorker
         _apiRoot = apiRoot;
         _endpoint = endpoint;
         _companyId = companyId;
+
+        _bigOrderLines = bigOrderLines;
+        _bigOrderIntervalMinutes = bigOrderIntervalMinutes;
+        _lastBigOrder = DateTime.UtcNow;
     }
 
-protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
-{
-    // 🔥 JSON aus Pool holen (NEU!)
-    string json;
-
-    if (!_payloadPool.TryGet(out json))
+    protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
-        // 🔁 Fallback → Random bleibt erhalten
-        json = _payloadPool.GetRandom();
+        string json;
+        var now = DateTime.UtcNow;
 
-        await Task.Delay(50, token);
-    }
+        // =========================
+        // 🔥 BIG ORDER LOGIC (FINAL)
+        // =========================
+        bool createBigOrder = false;
 
-    // 🔥 Pool Size für UI (live, NACH dem Dequeue!)
-    _stats.SetPoolSize(_workerName, _company, _payloadPool.Count);
+        if (_bigOrderLines > 0 && _bigOrderIntervalMinutes > 0)
+        {
+            lock (_bigOrderLock)
+            {
+                if ((now - _lastBigOrder).TotalMinutes >= _bigOrderIntervalMinutes)
+                {
+                    createBigOrder = true;
+                    _lastBigOrder = now;
+                }
+            }
+        }
 
-    if (string.IsNullOrWhiteSpace(json))
-    {
-        await Task.Delay(200, token);
-        return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
-    }
+        if (createBigOrder)
+        {
+            json = _payloadPool.CreateBigOrder(_bigOrderLines);
 
-    // 🔥 JSON → Dictionary
-    var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+            // 🔥 Tracking
+            _stats.IncrementCustomMetric(_workerName, _company, "BigOrders");
+        }
+        else
+        {
+            if (!_payloadPool.TryGet(out json))
+            {
+                json = _payloadPool.GetRandom();
+                await Task.Delay(50, token);
+            }
+        }
 
-    if (payload == null)
-    {
-        await Task.Delay(200, token);
-        return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
-    }
+        // 🔁 Auto-Refill
+        _payloadPool.RefillIfLow();
 
-    // 🔥 eindeutige OrderNo (max 20 Zeichen!)
-    var now = DateTime.UtcNow;
+        // 📊 Pool Size
+        _stats.SetPoolSize(_workerName, _company, _payloadPool.Count);
 
-    var id = $"{now:yyMMddHHmmssfff}{Interlocked.Increment(ref _counter) % 1000:000}";
-
-    if (id.Length > 20)
-        id = id.Substring(0, 20);
-
-    // 🔥 Felder überschreiben
-    payload["shopOrderNumber"] = id;
-    payload["externalReferenceNo"] = id;
-    payload["externalDocumentNo"] = id;
-    payload["basketId"] = id;
-    payload["orderDateTime"] = now;
-
-    var newJson = JsonSerializer.Serialize(payload);
-
-    var url = $"{_serviceRoot}{_apiRoot}{_endpoint}"
-        .Replace("{company}", _companyId);
-
-    using var content = new StringContent(newJson, Encoding.UTF8, "application/json");
-
-    var response = await _client.PostAsync(url, content, token);
-
-    await response.Content.LoadIntoBufferAsync();
-
-    if (!response.IsSuccessStatusCode)
-    {
-        if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
+        if (string.IsNullOrWhiteSpace(json))
         {
             await Task.Delay(200, token);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
-    }
 
-    return response;
-}}
+        Dictionary<string, object>? payload;
+
+        try
+        {
+            payload = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        }
+        catch
+        {
+            await Task.Delay(50, token);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest);
+        }
+
+        if (payload == null)
+        {
+            await Task.Delay(50, token);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
+        }
+
+        // =========================
+        // 🔥 UNIQUE ID
+        // =========================
+        var id = $"{now:yyMMddHHmmssfff}{Interlocked.Increment(ref _counter) % 1000:000}";
+
+        if (id.Length > 20)
+            id = id.Substring(0, 20);
+
+        payload["shopOrderNumber"] = id;
+        payload["externalReferenceNo"] = id;
+        payload["externalDocumentNo"] = id;
+        payload["basketId"] = id;
+        payload["orderDateTime"] = now;
+
+        var newJson = JsonSerializer.Serialize(payload);
+
+        var url = $"{_serviceRoot}{_apiRoot}{_endpoint}"
+            .Replace("{company}", _companyId);
+
+        using var content = new StringContent(newJson, Encoding.UTF8, "application/json");
+
+        var response = await _client.PostAsync(url, content, token);
+
+        await response.Content.LoadIntoBufferAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
+            {
+                await Task.Delay(200, token);
+            }
+        }
+
+        return response;
+    }
+}
