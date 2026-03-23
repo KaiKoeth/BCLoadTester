@@ -103,4 +103,26 @@ public static class ConfigLoader
             $"Password={config.dbPassword};" +
             $"TrustServerCertificate=True;";
     }
+
+    public static void SaveAs(AppConfig config, string path)
+    {
+        var json = JsonSerializer.Serialize(
+            config,
+            new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+        File.WriteAllText(path, json);
+    }
+
+    public static AppConfig LoadFrom(string path)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException($"Config not found: {path}");
+
+        var json = File.ReadAllText(path);
+
+        return JsonSerializer.Deserialize<AppConfig>(json)!;
+    }
 }
