@@ -162,7 +162,7 @@ public class ConnectionSetupForm : Form
         _config.sqlPort = int.Parse(txtSqlPort.Text);
         _config.database = txtDatabase.Text;
         _config.loadTestTableName = txtLoadTestTable.Text;
-        
+
         ConfigLoader.Save(_config);
 
         _isDirty = false;

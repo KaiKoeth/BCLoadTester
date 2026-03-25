@@ -7,7 +7,6 @@ public class WebOrderConfigForm : Form
 
     private NumericUpDown numMin;
     private NumericUpDown numMax;
-    private NumericUpDown numPool;
     private NumericUpDown numBigLines;
     private NumericUpDown numInterval;
 
@@ -35,7 +34,6 @@ public class WebOrderConfigForm : Form
 
         numMin = CreateNumber(_config.minLines);
         numMax = CreateNumber(_config.maxLines);
-        numPool = CreateNumber(_config.WeborderPoolSize, 1000000);
         numBigLines = CreateNumber(_config.bigOrderLines, 1000);
         numInterval = CreateNumber(_config.bigOrderIntervalMinutes, 3600);
 
@@ -45,14 +43,11 @@ public class WebOrderConfigForm : Form
         layout.Controls.Add(new Label { Text = "Max Lines" }, 0, 1);
         layout.Controls.Add(numMax, 1, 1);
 
-        layout.Controls.Add(new Label { Text = "Pool Size" }, 0, 2);
-        layout.Controls.Add(numPool, 1, 2);
+        layout.Controls.Add(new Label { Text = "Big Order Lines" }, 0, 2);
+        layout.Controls.Add(numBigLines, 1, 2);
 
-        layout.Controls.Add(new Label { Text = "Big Order Lines" }, 0, 3);
-        layout.Controls.Add(numBigLines, 1, 3);
-
-        layout.Controls.Add(new Label { Text = "Big Order Interval (s)" }, 0, 4);
-        layout.Controls.Add(numInterval, 1, 4);
+        layout.Controls.Add(new Label { Text = "Big Order Interval (s)" }, 0, 3);
+        layout.Controls.Add(numInterval, 1, 3);
 
         var btnOk = new Button
         {
@@ -65,7 +60,6 @@ public class WebOrderConfigForm : Form
         {
             _config.minLines = (int)numMin.Value;
             _config.maxLines = (int)numMax.Value;
-            _config.WeborderPoolSize = (int)numPool.Value;
             _config.bigOrderLines = (int)numBigLines.Value;
             _config.bigOrderIntervalMinutes = (int)numInterval.Value;
 

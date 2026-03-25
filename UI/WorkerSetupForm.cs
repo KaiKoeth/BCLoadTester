@@ -13,11 +13,10 @@ public class WorkerSetupForm : Form
         _config = config;
 
         Text = "Worker Setup";
-        Width = 900;
-        Height = 500;
+        Width = 1000;
+        Height = 520;
         StartPosition = FormStartPosition.CenterParent;
 
-        // 🔥 FormClosing Hook
         this.FormClosing += WorkerSetupForm_FormClosing;
 
         grid = new DataGridView
@@ -28,7 +27,7 @@ public class WorkerSetupForm : Form
             AllowUserToAddRows = false
         };
 
-        // 🔥 Dirty Tracking (wichtig für Checkbox + Text)
+        // 🔥 Dirty Tracking
         grid.CellValueChanged += (s, e) => MarkDirty();
         grid.CurrentCellDirtyStateChanged += (s, e) =>
         {
@@ -36,7 +35,10 @@ public class WorkerSetupForm : Form
                 grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
         };
 
-        // Columns
+        // =========================
+        // 🔷 COLUMNS
+        // =========================
+
         grid.Columns.Add("type", "Worker");
         grid.Columns.Add("endpoint", "Endpoint");
 
@@ -46,6 +48,14 @@ public class WorkerSetupForm : Form
             HeaderText = "Enabled"
         };
         grid.Columns.Add(enabledCol);
+
+        // 🔥 NEU: Buffer Factor
+        var bufferCol = new DataGridViewTextBoxColumn
+        {
+            Name = "buffer",
+            HeaderText = "Buffer Factor",
+        };
+        grid.Columns.Add(bufferCol);
 
         grid.Columns["type"].ReadOnly = true;
 
@@ -87,7 +97,6 @@ public class WorkerSetupForm : Form
         {
             Save();
         }
-        // No = schließen ohne speichern
     }
 
     // =========================
@@ -99,16 +108,19 @@ public class WorkerSetupForm : Form
 
         foreach (var w in _config.workers)
         {
+            var buffer = w.bufferFactor <= 0 ? 1.2 : w.bufferFactor;
+
             grid.Rows.Add(
                 w.type,
                 w.endpoint,
-                w.enabled
+                w.enabled,
+                buffer.ToString("0.00")
             );
         }
     }
 
     // =========================
-    // 🔧 SAVE (intern)
+    // 🔧 SAVE
     // =========================
     void Save()
     {
@@ -121,6 +133,18 @@ public class WorkerSetupForm : Form
 
             worker.endpoint = row.Cells["endpoint"].Value?.ToString() ?? "";
             worker.enabled = Convert.ToBoolean(row.Cells["enabled"].Value);
+
+            // 🔥 Buffer sauber parsen + validieren
+            var bufferText = row.Cells["buffer"].Value?.ToString();
+
+            if (double.TryParse(bufferText, out double buffer))
+            {
+                worker.bufferFactor = Math.Max(1.0, buffer); // min 1.0
+            }
+            else
+            {
+                worker.bufferFactor = 1.2; // fallback
+            }
         }
 
         ConfigLoader.Save(_config);

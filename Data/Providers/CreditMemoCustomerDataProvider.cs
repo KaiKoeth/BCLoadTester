@@ -9,7 +9,7 @@ public class CreditMemoCustomerDataProvider
         _connectionString = connectionString;
     }
 
-    public async Task<List<string>> LoadCustomers(string company)
+    public async Task<List<string>> LoadCustomers(string company, int limit)
     {
         var result = new List<string>();
 
@@ -19,12 +19,18 @@ public class CreditMemoCustomerDataProvider
         var table = $"[{company}$Sales Cr_Memo Header]";
 
         var sql = $@"
-            SELECT DISTINCT [Sell-to Customer No_]
-            FROM {table} WITH (NOLOCK)
-            WHERE [Sell-to Customer No_] <> ''
+            SELECT TOP (@limit) [Sell-to Customer No_]
+            FROM (
+                SELECT DISTINCT [Sell-to Customer No_]
+                FROM {table} WITH (NOLOCK)
+                WHERE [Sell-to Customer No_] <> ''
+            ) t
+            ORDER BY NEWID()
         ";
 
         using var cmd = new SqlCommand(sql, connection);
+        cmd.Parameters.AddWithValue("@limit", limit);
+
         using var reader = await cmd.ExecuteReaderAsync();
 
         while (await reader.ReadAsync())

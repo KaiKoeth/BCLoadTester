@@ -72,8 +72,7 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 6,
-        "WeborderPoolSize": 60000
+        "maxLines": 6
       }
     },
     {
@@ -93,8 +92,7 @@
       },
       "webOrderConfig": {
         "minLines": 1,
-        "maxLines": 3,
-        "WeborderPoolSize": 2000
+        "maxLines": 3
       }
     },
     {
@@ -114,8 +112,7 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3,
-        "WeborderPoolSize": 60000
+        "maxLines": 3
       }
     },
     {
@@ -135,8 +132,7 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3,
-        "WeborderPoolSize": 60000
+        "maxLines": 3
       }
     },
     {
@@ -156,8 +152,7 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3,
-        "WeborderPoolSize": 60000
+        "maxLines": 3
       }
     },
     {
@@ -177,8 +172,7 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3,
-        "WeborderPoolSize": 60000
+        "maxLines": 3
       }
     }
   ]

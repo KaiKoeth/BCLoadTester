@@ -9,7 +9,7 @@ public class CustomerDataProvider
         _connectionString = connectionString;
     }
 
-    public async Task<List<CustomerEntry>> LoadCustomers(string companyName)
+    public async Task<List<CustomerEntry>> LoadCustomers(string companyName, int limit)
     {
         var result = new List<CustomerEntry>();
 
@@ -21,7 +21,7 @@ public class CustomerDataProvider
         var ContTable = $"[{companyName}$Contact]";
 
         var sql = $@"
-            SELECT
+            SELECT TOP (@limit)
                 C.Name,
                 C.Address,
                 C.[Post Code],
@@ -32,9 +32,11 @@ public class CustomerDataProvider
                 CT.Surname
             FROM {CustTable} C WITH (NOLOCK)
             JOIN {ContTable} CT WITH (NOLOCK) ON C.No_ = CT.No_
-            WHERE C.[E-Mail] <> '' AND CT.Surname <> '' and CT.[First Name] <> ''";
+            WHERE C.[E-Mail] <> '' AND CT.Surname <> '' and CT.[First Name] <> ''
+            ORDER BY NEWID()";
 
         using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@limit", limit);
 
         using var reader = await command.ExecuteReaderAsync();
 

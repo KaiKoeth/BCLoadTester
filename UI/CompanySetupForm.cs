@@ -146,7 +146,7 @@ public class CompanySetupForm : Form
                 SortMode = DataGridViewColumnSortMode.NotSortable
             };
 
-            
+
             col.HeaderText = $"{(worker.enabled ? "☑" : "☐")} {worker.type}";
 
             grid.Columns.Add(col);
@@ -254,7 +254,7 @@ public class CompanySetupForm : Form
 
             grid.Columns[e.ColumnIndex].HeaderText =
                 $"{(worker.enabled ? "☑" : "☐")} {worker.type}";
-            
+
 
             MarkDirty();
         }
@@ -307,7 +307,6 @@ public class CompanySetupForm : Form
         e.ToolTipText =
             $"⚙ WebOrder Settings\n" +
             $"Lines: {cfg.minLines}-{cfg.maxLines}\n" +
-            $"Pool: {cfg.WeborderPoolSize}\n" +
             $"BigOrder: {cfg.bigOrderLines} / {cfg.bigOrderIntervalMinutes} min\n\n" +
             $"Double click to edit";
     }
@@ -347,7 +346,6 @@ public class CompanySetupForm : Form
             {
                 minLines = 1,
                 maxLines = 1,
-                WeborderPoolSize = 1000,
                 bigOrderLines = 0,
                 bigOrderIntervalMinutes = 0
             }

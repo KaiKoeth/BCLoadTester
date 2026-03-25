@@ -2,7 +2,7 @@ public class AppConfig
 {
     public string serviceRoot { get; set; } = "";
     public string apiRoot { get; set; } = "";
-    
+
     public string username { get; set; } = "";
     public string password { get; set; } = "";
     public string connectionString { get; set; } = "";
@@ -15,7 +15,7 @@ public class AppConfig
     public string database { get; set; }
     public string dbUser { get; set; }
     public string dbPassword { get; set; }
-    
+
     public List<WorkerConfig> workers { get; set; }
     public List<Company> companies { get; set; } = new();
 
@@ -28,4 +28,3 @@ public class AppConfig
 }
 
 
-    

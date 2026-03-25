@@ -3,7 +3,6 @@ using Microsoft.Data.SqlClient;
 public class WebOrderProfile
 {
     public List<OrderCustomerEntry> Customers { get; set; } = new();
-
     public List<OrderItemEntry> Items { get; set; } = new();
 }
 
@@ -16,7 +15,10 @@ public class WebOrderDataProvider
         _connectionString = connectionString;
     }
 
-    public async Task<WebOrderProfile> LoadProfile(string company)
+    public async Task<WebOrderProfile> LoadProfile(
+        string company,
+        int limitCustomers,
+        int limitItems)
     {
         var profile = new WebOrderProfile();
 
@@ -26,15 +28,13 @@ public class WebOrderDataProvider
         var randomTable = $"[{company}$Random Profile Line MAC]";
         var customerTable = $"[{company}$Customer]";
         var itemTable = $"[{company}$Item]";
-         var SalutationTable = $"[{company}$Salutation]";
+        var salutationTable = $"[{company}$Salutation]";
 
-
-        // -------------------------
-        // Customers laden
-        // -------------------------
-
+        // =========================
+        // 🔹 CUSTOMERS (RPM-basiert)
+        // =========================
         var customerCmd = new SqlCommand($@"
-            SELECT
+            SELECT TOP (@limitCustomers)
                 c.[No_],
                 c.[Name],
                 c.[First Name GLX],
@@ -48,17 +48,17 @@ public class WebOrderDataProvider
                 s.[Salutation Code Webshop GLX], 
                 c.[Country_Region Code],
                 c.[Payment Method Code]
-            FROM {randomTable} r WITH (READUNCOMMITTED)
-            INNER JOIN {customerTable} c WITH (READUNCOMMITTED)
+            FROM {randomTable} r WITH (NOLOCK)
+            INNER JOIN {customerTable} c WITH (NOLOCK)
                 ON r.[No_] = c.[No_]
-
-            -- 🔥 NEUER JOIN
-            JOIN {SalutationTable} s WITH (READUNCOMMITTED)
+            JOIN {salutationTable} s WITH (NOLOCK)
                 ON c.[Salutation Code MAC] = s.[Code]
-
             WHERE r.[Random Profile No_] = 'DEFAULT'
-            AND r.[Type] = 1
+              AND r.[Type] = 1
+            ORDER BY NEWID()
         ", conn);
+
+        customerCmd.Parameters.AddWithValue("@limitCustomers", limitCustomers);
 
         using (var reader = await customerCmd.ExecuteReaderAsync())
         {
@@ -75,7 +75,7 @@ public class WebOrderDataProvider
                     Address = reader.GetString(6),
                     City = reader.GetString(7),
                     PostCode = reader.GetString(8),
-                    Email = reader.GetString(9),
+                    Email = reader.IsDBNull(9) ? "" : reader.GetString(9),
                     salutation = reader.GetInt32(10).ToString(),
                     countryregion = reader.GetString(11),
                     paymentmethod = reader.GetString(12),
@@ -83,21 +83,23 @@ public class WebOrderDataProvider
             }
         }
 
-        // -------------------------
-        // Items laden
-        // -------------------------
-
+        // =========================
+        // 🔹 ITEMS (RPM-basiert)
+        // =========================
         var itemCmd = new SqlCommand($@"
-            SELECT
+            SELECT TOP (@limitItems)
                 i.[No_],
                 i.[Description],
                 i.[Unit Price]
-            FROM {randomTable} r WITH (READUNCOMMITTED)
-            INNER JOIN {itemTable} i WITH (READUNCOMMITTED)
+            FROM {randomTable} r WITH (NOLOCK)
+            INNER JOIN {itemTable} i WITH (NOLOCK)
                 ON r.[No_] = i.[No_]
             WHERE r.[Random Profile No_] = 'DEFAULT'
               AND r.[Type] = 3
+            ORDER BY NEWID()
         ", conn);
+
+        itemCmd.Parameters.AddWithValue("@limitItems", limitItems);
 
         using (var reader = await itemCmd.ExecuteReaderAsync())
         {
