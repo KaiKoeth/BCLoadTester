@@ -43,6 +43,7 @@ public partial class LoadTestDashboard : Form
 
     private List<DashboardRow> _allRows = new();
     private List<DashboardRow> _visibleRows = new();
+    private List<(string Worker, string Company, long Rpm, long Requests, long Errors, double Rps, int PoolSize, double AvgMs, long MaxMs)> _cachedStats = new();
 
     private int _remainingMinutes = 0;
     private int _loadedDurationMinutes = 0;
@@ -453,16 +454,30 @@ public partial class LoadTestDashboard : Form
 
             lblRuntime.Text = $"Runtime: {runtime:hh\\:mm\\:ss}";
 
-            var stats = _stats.GetStats()
-                .OrderBy(s => s.Company)
-                .ThenBy(s => s.Worker)
-                .ToList();
+            var stats = _stats.GetStats();
 
-            if (stats.Any())
+            // 🔥 Snapshot + reuse
+            _cachedStats.Clear();
+
+            foreach (var stat in stats)
             {
-                BuildRows(stats);
+                _cachedStats.Add(stat);
             }
 
+            // 🔥 schneller als LINQ
+            _cachedStats.Sort(static (a, b) =>
+            {
+                int cmp = string.Compare(a.Company, b.Company, StringComparison.Ordinal);
+                if (cmp != 0)
+                    return cmp;
+
+                return string.Compare(a.Worker, b.Worker, StringComparison.Ordinal);
+            });
+
+            if (_cachedStats.Count > 0)
+            {
+                BuildRows(_cachedStats);
+            }
             RefreshGrid(runtime);
 
             UpdatePoolWarnings();
@@ -682,7 +697,10 @@ public partial class LoadTestDashboard : Form
                                     _stats,
                                     workerKey,
                                     company.webOrderConfig?.bigOrderLines ?? 0,
-                                    company.webOrderConfig?.bigOrderIntervalMinutes ?? 0
+                                    company.webOrderConfig?.bigOrderIntervalMinutes ?? 0,
+                                    company.webOrderConfig?.promotionMediumNo,
+                                    company.webOrderConfig?.promotionMediumTrgGrpNo,
+                                    company.webOrderConfig?.shippingChargeAmount ?? 0
                                 ));
                                 break;
                             }
@@ -1008,7 +1026,8 @@ public partial class LoadTestDashboard : Form
                             profile,
                             company.webOrderConfig.minLines,
                             company.webOrderConfig.maxLines,
-                            requiredOrders
+                            requiredOrders,
+                            company.webOrderConfig?.shippingChargeAmount ?? 0
                         );
                     }
                 }

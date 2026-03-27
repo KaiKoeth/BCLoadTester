@@ -15,4 +15,7 @@ public class WebOrderConfig
     // 🔥 NEU: Big Orders
     public int bigOrderLines { get; set; } = 0;
     public int bigOrderIntervalMinutes { get; set; } = 0;
+    public string promotionMediumNo { get; set; } = "";
+    public string promotionMediumTrgGrpNo { get; set; } = "";
+    public decimal shippingChargeAmount { get; set; } = 0;
 }

@@ -72,7 +72,9 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 6
+        "maxLines": 6,
+        "promotionMediumNo": "QUELLE_DE",
+        "promotionMediumTrgGrpNo": "STD"
       }
     },
     {
@@ -92,7 +94,9 @@
       },
       "webOrderConfig": {
         "minLines": 1,
-        "maxLines": 3
+        "maxLines": 3,
+        "promotionMediumNo": "QUELLE_DE",
+        "promotionMediumTrgGrpNo": "STD"
       }
     },
     {
@@ -112,7 +116,9 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3
+        "maxLines": 3,
+        "promotionMediumNo": "QUELLE_DE",
+        "promotionMediumTrgGrpNo": "STD"
       }
     },
     {
@@ -132,7 +138,9 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3
+        "maxLines": 3,
+        "promotionMediumNo": "QUELLE_DE",
+        "promotionMediumTrgGrpNo": "STD"
       }
     },
     {
@@ -152,7 +160,9 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3
+        "maxLines": 3,
+        "promotionMediumNo": "QUELLE_DE",
+        "promotionMediumTrgGrpNo": "STD"
       }
     },
     {
@@ -172,7 +182,9 @@
       },
       "webOrderConfig": {
         "minLines": 2,
-        "maxLines": 3
+        "maxLines": 3,
+        "promotionMediumNo": "QUELLE_DE",
+        "promotionMediumTrgGrpNo": "STD"
       }
     }
   ]

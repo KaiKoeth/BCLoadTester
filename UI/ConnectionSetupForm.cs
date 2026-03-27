@@ -19,6 +19,15 @@ public class ConnectionSetupForm : Form
     private TextBox txtDatabase;
     private TextBox txtLoadTestTable;
 
+    // 🔥 NEW
+    private TextBox txtRpmPerWorker;
+    private TextBox txtMaxWorkersPerType;
+    private TextBox txtMaxConnectionsPerServer;
+
+    // 🔥 ToolTip (persisted)
+    private ToolTip _toolTip;
+    private Label lblRpm;
+
     private bool _isDirty = false;
 
     public ConnectionSetupForm(AppConfig config)
@@ -27,10 +36,9 @@ public class ConnectionSetupForm : Form
 
         Text = "Connection Setup";
         Width = 600;
-        Height = 350;
+        Height = 450;
         StartPosition = FormStartPosition.CenterParent;
 
-        // 🔥 FormClosing Hook
         this.FormClosing += ConnectionSetupForm_FormClosing;
 
         var layout = new TableLayoutPanel
@@ -40,10 +48,19 @@ public class ConnectionSetupForm : Form
             Padding = new Padding(10)
         };
 
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        // 🔥 ToolTip setup
+        _toolTip = new ToolTip
+        {
+            IsBalloon = true,
+            AutoPopDelay = 8000,
+            InitialDelay = 300,
+            ReshowDelay = 100
+        };
+
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < 11; i++)
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
 
         txtServiceRoot = new TextBox { Text = _config.serviceRoot, Dock = DockStyle.Fill };
@@ -54,8 +71,26 @@ public class ConnectionSetupForm : Form
         txtSqlServer = new TextBox { Text = _config.sqlServer, Dock = DockStyle.Fill };
         txtSqlPort = new TextBox { Text = _config.sqlPort.ToString(), Dock = DockStyle.Fill };
         txtDatabase = new TextBox { Text = _config.database, Dock = DockStyle.Fill };
-
         txtLoadTestTable = new TextBox { Text = _config.loadTestTableName, Dock = DockStyle.Fill };
+
+        // 🔥 NEW FIELDS (with defaults)
+        txtRpmPerWorker = new TextBox
+        {
+            Text = (_config.rpmPerWorker == 0 ? 150 : _config.rpmPerWorker).ToString(),
+            Dock = DockStyle.Fill
+        };
+
+        txtMaxWorkersPerType = new TextBox
+        {
+            Text = (_config.maxWorkersPerType == 0 ? 600 : _config.maxWorkersPerType).ToString(),
+            Dock = DockStyle.Fill
+        };
+
+        txtMaxConnectionsPerServer = new TextBox
+        {
+            Text = (_config.maxConnectionsPerServer == 0 ? 5000 : _config.maxConnectionsPerServer).ToString(),
+            Dock = DockStyle.Fill
+        };
 
         // 🔥 Dirty Tracking
         txtServiceRoot.TextChanged += (s, e) => MarkDirty();
@@ -65,32 +100,62 @@ public class ConnectionSetupForm : Form
         txtSqlServer.TextChanged += (s, e) => MarkDirty();
         txtSqlPort.TextChanged += (s, e) => MarkDirty();
         txtDatabase.TextChanged += (s, e) => MarkDirty();
+        txtLoadTestTable.TextChanged += (s, e) => MarkDirty();
 
-        layout.Controls.Add(new Label { Text = "ServiceRoot" }, 0, 0);
-        layout.Controls.Add(txtServiceRoot, 1, 0);
+        txtMaxWorkersPerType.TextChanged += (s, e) => MarkDirty();
+        txtMaxConnectionsPerServer.TextChanged += (s, e) => MarkDirty();
+        txtRpmPerWorker.TextChanged += (s, e) =>
+        {
+            MarkDirty();
+            UpdateRpmTooltip();
+        };
 
-        layout.Controls.Add(new Label { Text = "ApiRoot" }, 0, 1);
-        layout.Controls.Add(txtApiRoot, 1, 1);
+        int row = 0;
 
-        layout.Controls.Add(new Label { Text = "Username" }, 0, 2);
-        layout.Controls.Add(txtUser, 1, 2);
+        layout.Controls.Add(new Label { Text = "ServiceRoot" }, 0, row);
+        layout.Controls.Add(txtServiceRoot, 1, row++);
 
-        layout.Controls.Add(new Label { Text = "Password" }, 0, 3);
-        layout.Controls.Add(txtPassword, 1, 3);
+        layout.Controls.Add(new Label { Text = "ApiRoot" }, 0, row);
+        layout.Controls.Add(txtApiRoot, 1, row++);
 
-        layout.Controls.Add(new Label { Text = "SQL Server" }, 0, 4);
-        layout.Controls.Add(txtSqlServer, 1, 4);
+        layout.Controls.Add(new Label { Text = "Username" }, 0, row);
+        layout.Controls.Add(txtUser, 1, row++);
 
-        layout.Controls.Add(new Label { Text = "SQL Port" }, 0, 5);
-        layout.Controls.Add(txtSqlPort, 1, 5);
+        layout.Controls.Add(new Label { Text = "Password" }, 0, row);
+        layout.Controls.Add(txtPassword, 1, row++);
 
-        layout.Controls.Add(new Label { Text = "Database" }, 0, 6);
-        layout.Controls.Add(txtDatabase, 1, 6);
+        layout.Controls.Add(new Label { Text = "SQL Server" }, 0, row);
+        layout.Controls.Add(txtSqlServer, 1, row++);
 
-        layout.Controls.Add(new Label { Text = "LoadTest Table" }, 0, 7);
-        layout.Controls.Add(txtLoadTestTable, 1, 7);
+        layout.Controls.Add(new Label { Text = "SQL Port" }, 0, row);
+        layout.Controls.Add(txtSqlPort, 1, row++);
 
-        // 🔥 Buttons (kein Save mehr!)
+        layout.Controls.Add(new Label { Text = "Database" }, 0, row);
+        layout.Controls.Add(txtDatabase, 1, row++);
+
+        layout.Controls.Add(new Label { Text = "LoadTest Table" }, 0, row);
+        layout.Controls.Add(txtLoadTestTable, 1, row++);
+
+        // 🔥 NEW SETTINGS UI (with label tooltips too)
+        lblRpm = new Label { Text = "RPM per Worker" };
+        layout.Controls.Add(lblRpm, 0, row);
+        layout.Controls.Add(txtRpmPerWorker, 1, row);
+        row++;
+
+        var lblWorkers = new Label { Text = "Max Workers per Type" };
+        layout.Controls.Add(lblWorkers, 0, row);
+        layout.Controls.Add(txtMaxWorkersPerType, 1, row);
+        _toolTip.SetToolTip(lblWorkers, "Maximale parallele Worker pro Typ (Lastverteilung)");
+        _toolTip.SetToolTip(txtMaxWorkersPerType, "Maximale parallele Worker pro Typ (Lastverteilung)");
+        row++;
+
+        var lblConn = new Label { Text = "Max Connections per Server" };
+        layout.Controls.Add(lblConn, 0, row);
+        layout.Controls.Add(txtMaxConnectionsPerServer, 1, row);
+        _toolTip.SetToolTip(lblConn, "Max. gleichzeitige HTTP-Verbindungen (Client-Limit)");
+        _toolTip.SetToolTip(txtMaxConnectionsPerServer, "Max. gleichzeitige HTTP-Verbindungen (Client-Limit)");
+        row++;
+
         var buttonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -110,30 +175,26 @@ public class ConnectionSetupForm : Form
 
         Controls.Add(layout);
         Controls.Add(buttonPanel);
+
+        UpdateRpmTooltip();
+
     }
 
-    // =========================
-    // 🔥 DIRTY HANDLING
-    // =========================
     void MarkDirty()
     {
         _isDirty = true;
-
-        if (!Text.EndsWith("*"))
-            Text += " *";
+        if (!Text.EndsWith("*")) Text += " *";
     }
 
     private void ConnectionSetupForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
-        if (!_isDirty)
-            return;
+        if (!_isDirty) return;
 
         var result = MessageBox.Show(
             "There are unsaved changes.\n\nDo you want to save them?",
             "Save changes",
             MessageBoxButtons.YesNoCancel,
-            MessageBoxIcon.Question
-        );
+            MessageBoxIcon.Question);
 
         if (result == DialogResult.Cancel)
         {
@@ -141,16 +202,9 @@ public class ConnectionSetupForm : Form
             return;
         }
 
-        if (result == DialogResult.Yes)
-        {
-            Save();
-        }
-        // No = schließen ohne speichern
+        if (result == DialogResult.Yes) Save();
     }
 
-    // =========================
-    // 🔧 SAVE (intern)
-    // =========================
     private void Save()
     {
         _config.serviceRoot = txtServiceRoot.Text;
@@ -163,15 +217,17 @@ public class ConnectionSetupForm : Form
         _config.database = txtDatabase.Text;
         _config.loadTestTableName = txtLoadTestTable.Text;
 
+        // 🔥 NEW SAVE
+        _config.rpmPerWorker = int.Parse(txtRpmPerWorker.Text);
+        _config.maxWorkersPerType = int.Parse(txtMaxWorkersPerType.Text);
+        _config.maxConnectionsPerServer = int.Parse(txtMaxConnectionsPerServer.Text);
+
         ConfigLoader.Save(_config);
 
         _isDirty = false;
         Text = "Connection Setup";
     }
 
-    // =========================
-    // 🔧 TEST SQL
-    // =========================
     private async Task TestSqlConnection()
     {
         try
@@ -184,8 +240,7 @@ public class ConnectionSetupForm : Form
                 $"TrustServerCertificate=True;" +
                 $"Connection Timeout=3;";
 
-            using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
-
+            using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync();
 
             MessageBox.Show("✅ SQL connection successful", "Success");
@@ -196,23 +251,16 @@ public class ConnectionSetupForm : Form
         }
     }
 
-    // =========================
-    // 🔧 TEST API
-    // =========================
     private async Task TestApiConnection()
     {
         try
         {
-            using var client = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(5)
-            };
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
             var url = txtServiceRoot.Text.TrimEnd('/') + txtApiRoot.Text;
 
             var auth = Convert.ToBase64String(
-                System.Text.Encoding.ASCII.GetBytes($"{txtUser.Text}:{txtPassword.Text}")
-            );
+                System.Text.Encoding.ASCII.GetBytes($"{txtUser.Text}:{txtPassword.Text}"));
 
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", auth);
@@ -220,17 +268,32 @@ public class ConnectionSetupForm : Form
             var response = await client.GetAsync(url);
 
             if (response.IsSuccessStatusCode)
-            {
                 MessageBox.Show("✅ API reachable", "Success");
-            }
             else
-            {
                 MessageBox.Show($"⚠️ API responded: {response.StatusCode}", "Warning");
-            }
         }
         catch (Exception ex)
         {
             MessageBox.Show($"❌ API failed:\n{ex.Message}", "Error");
+        }
+    }
+
+    private void UpdateRpmTooltip()
+    {
+        if (int.TryParse(txtRpmPerWorker.Text, out int rpm))
+        {
+            var rps = rpm / 60.0;
+
+            var text = $"Requests pro Worker pro Minute\n" +
+                       $"Aktuell: {rpm} RPM ≈ {rps:F2} req/sec";
+
+            _toolTip.SetToolTip(txtRpmPerWorker, text);
+            _toolTip.SetToolTip(lblRpm, text);   // 🔥 DAS ist neu
+        }
+        else
+        {
+            _toolTip.SetToolTip(txtRpmPerWorker, "Ungültiger Wert");
+            _toolTip.SetToolTip(lblRpm, "Ungültiger Wert");
         }
     }
 }

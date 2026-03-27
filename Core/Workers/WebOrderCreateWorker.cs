@@ -14,6 +14,9 @@ public class WebOrderCreateWorker : BaseWorker
 
     private readonly int _bigOrderLines;
     private readonly int _bigOrderIntervalMinutes;
+    private readonly string _promotionMediumNo;
+    private readonly string _promotionMediumTrgGrpNo;
+    private readonly decimal _shippingChargeAmount;
 
     private DateTime _lastBigOrder = DateTime.MinValue;
     private readonly object _bigOrderLock = new();
@@ -33,8 +36,12 @@ public class WebOrderCreateWorker : BaseWorker
         Statistics stats,
         string workerName,
         int bigOrderLines = 0,
-        int bigOrderIntervalMinutes = 0)
-        : base(client, stats, workerName, companyName, Math.Max(1, rpm))
+        int bigOrderIntervalMinutes = 0,
+        string? promotionMediumNo = null,
+        string? promotionMediumTrgGrpNo = null,
+        decimal shippingChargeAmount = 0
+    )
+    : base(client, stats, workerName, companyName, Math.Max(1, rpm))
     {
         _orderStatusPool = orderStatusPool;
         _payloadPool = payloadPool;
@@ -45,6 +52,10 @@ public class WebOrderCreateWorker : BaseWorker
 
         _bigOrderLines = bigOrderLines;
         _bigOrderIntervalMinutes = bigOrderIntervalMinutes;
+        _promotionMediumNo = promotionMediumNo ?? "";
+        _promotionMediumTrgGrpNo = promotionMediumTrgGrpNo ?? "";
+        _shippingChargeAmount = shippingChargeAmount;
+
         _lastBigOrder = DateTime.UtcNow;
     }
 
@@ -128,7 +139,22 @@ public class WebOrderCreateWorker : BaseWorker
         payload["externalReferenceNo"] = id;
         payload["externalDocumentNo"] = id;
         payload["basketId"] = id;
-        payload["orderDateTime"] = now;
+
+        // 🔥 FIX: ISO 8601 (BC sauber)
+        payload["orderDateTime"] = now.ToString("o");
+
+        // =========================
+        // 🔥 PROMOTION (NEU)
+        // =========================
+        if (!string.IsNullOrEmpty(_promotionMediumNo))
+        {
+            payload["promotionMediumNo"] = _promotionMediumNo;
+        }
+
+        if (!string.IsNullOrEmpty(_promotionMediumTrgGrpNo))
+        {
+            payload["promotionMediumTrgGrpNo"] = _promotionMediumTrgGrpNo;
+        }
 
         var newJson = JsonSerializer.Serialize(payload);
 

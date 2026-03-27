@@ -11,6 +11,9 @@ public class WebOrderPayloadPool
     private readonly int _minLines;
     private readonly int _maxLines;
 
+    // 🔥 NEU
+    private readonly decimal _shippingChargeAmount;
+
     private static readonly JsonSerializerOptions _jsonOptions =
         new(JsonSerializerDefaults.Web);
 
@@ -22,11 +25,15 @@ public class WebOrderPayloadPool
         WebOrderProfile profile,
         int minLines,
         int maxLines,
-        int size)
+        int size,
+        decimal shippingChargeAmount = 0 // 🔥 NEU
+    )
     {
         _profile = profile;
         _minLines = minLines;
         _maxLines = maxLines;
+        _shippingChargeAmount = shippingChargeAmount;
+
         InitialSize = size;
 
         if (profile.Customers.Count == 0)
@@ -38,50 +45,36 @@ public class WebOrderPayloadPool
         // 🔥 Initial Fill
         for (int i = 0; i < size; i++)
         {
-            _payloads.Enqueue(CreatePayload(_profile, _minLines, _maxLines));
+            _payloads.Enqueue(CreatePayload(_profile, _minLines, _maxLines, _shippingChargeAmount));
         }
     }
 
-    // =========================
-    // 🔹 NORMAL GET (dequeue)
-    // =========================
     public bool TryGet(out string payload)
     {
         return _payloads.TryDequeue(out payload);
     }
 
-    // =========================
-    // 🔹 FALLBACK (random)
-    // =========================
     public string GetRandom()
     {
-        return CreatePayload(_profile, _minLines, _maxLines);
+        return CreatePayload(_profile, _minLines, _maxLines, _shippingChargeAmount);
     }
 
-    // =========================
-    // 🔥 BIG ORDER
-    // =========================
     public string CreateBigOrder(int lines)
     {
         if (lines <= 0)
-            return CreatePayload(_profile, _minLines, _maxLines);
+            return CreatePayload(_profile, _minLines, _maxLines, _shippingChargeAmount);
 
         var rnd = Random.Shared;
 
-        // 🔥 -10% bis 100%
         int min = (int)(lines * 0.9);
-
         if (min < 1)
             min = 1;
 
         int randomized = rnd.Next(min, lines + 1);
 
-        return CreatePayload(_profile, randomized, randomized);
+        return CreatePayload(_profile, randomized, randomized, _shippingChargeAmount);
     }
 
-    // =========================
-    // 🔁 OPTIONAL REFILL
-    // =========================
     public void RefillIfLow(int threshold = 1000, int refillAmount = 5000)
     {
         if (_payloads.Count > threshold)
@@ -89,7 +82,7 @@ public class WebOrderPayloadPool
 
         for (int i = 0; i < refillAmount; i++)
         {
-            _payloads.Enqueue(CreatePayload(_profile, _minLines, _maxLines));
+            _payloads.Enqueue(CreatePayload(_profile, _minLines, _maxLines, _shippingChargeAmount));
         }
     }
 
@@ -99,19 +92,25 @@ public class WebOrderPayloadPool
     private static string CreatePayload(
         WebOrderProfile profile,
         int minLines,
-        int maxLines)
+        int maxLines,
+        decimal shippingChargeAmount // 🔥 NEU
+    )
     {
         var rnd = Random.Shared;
 
         var customer = profile.Customers[rnd.Next(profile.Customers.Count)];
-
         int lines = rnd.Next(minLines, maxLines + 1);
 
         var quicksaleslines = new List<object>(lines);
 
+        decimal totalAmount = 0; // 🔥 NEU
+
         for (int i = 0; i < lines; i++)
         {
             var item = profile.Items[rnd.Next(profile.Items.Count)];
+
+            decimal lineAmount = item.UnitPrice; // quantity = 1
+            totalAmount += lineAmount;
 
             quicksaleslines.Add(new
             {
@@ -123,6 +122,23 @@ public class WebOrderPayloadPool
                 unitPrice = item.UnitPrice
             });
         }
+        // 🔥 SHIPPING DAZURECHNEN
+        if (shippingChargeAmount > 0)
+        {
+            totalAmount += shippingChargeAmount;
+        }
+
+        // 🔥 SHIPPING CHARGES ARRAY (BC-kompatibel)
+        var shippingCharges = shippingChargeAmount > 0
+            ? new[]
+            {
+                new
+                {
+                    shippingChargeType = "SC",
+                    shippingChargeAmount = shippingChargeAmount
+                }
+            }
+            : Array.Empty<object>();
 
         var payload = new
         {
@@ -131,6 +147,10 @@ public class WebOrderPayloadPool
             basketId = "",
             shopOrderNumber = "",
             orderDateTime = DateTime.UtcNow,
+
+            // 🔥 NEU
+            amount = totalAmount,
+            shippingChargeAmount = shippingChargeAmount,
 
             sellToCustomerNo = customer.No,
             sellToCustSalutationCode = customer.salutation,
@@ -157,7 +177,10 @@ public class WebOrderPayloadPool
 
             paymentmethodcode = customer.paymentmethod,
 
-            quicksaleslines = quicksaleslines
+            quicksaleslines = quicksaleslines,
+
+            // 🔥 NEU
+            quicksalesshippingcharges = shippingCharges
         };
 
         return JsonSerializer.Serialize(payload, _jsonOptions);
