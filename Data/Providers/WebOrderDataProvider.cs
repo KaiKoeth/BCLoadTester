@@ -25,13 +25,13 @@ public class WebOrderDataProvider
         using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync();
 
-        var randomTable = $"[{company}$Random Profile Line MAC]";
+        var randomTable = "[Random Profile No_ Laodtest]";
         var customerTable = $"[{company}$Customer]";
         var itemTable = $"[{company}$Item]";
         var salutationTable = $"[{company}$Salutation]";
 
         // =========================
-        // 🔹 CUSTOMERS (RPM-basiert)
+        // 🔹 CUSTOMERS
         // =========================
         var customerCmd = new SqlCommand($@"
             SELECT TOP (@limitCustomers)
@@ -50,15 +50,16 @@ public class WebOrderDataProvider
                 c.[Payment Method Code]
             FROM {randomTable} r WITH (NOLOCK)
             INNER JOIN {customerTable} c WITH (NOLOCK)
-                ON r.[No_] = c.[No_]
+                ON r.[No] = c.[No_]
             JOIN {salutationTable} s WITH (NOLOCK)
                 ON c.[Salutation Code MAC] = s.[Code]
-            WHERE r.[Random Profile No_] = 'DEFAULT'
+            WHERE r.[Companyname] = @company
               AND r.[Type] = 1
             ORDER BY NEWID()
         ", conn);
 
         customerCmd.Parameters.AddWithValue("@limitCustomers", limitCustomers);
+        customerCmd.Parameters.AddWithValue("@company", company);
 
         using (var reader = await customerCmd.ExecuteReaderAsync())
         {
@@ -84,7 +85,7 @@ public class WebOrderDataProvider
         }
 
         // =========================
-        // 🔹 ITEMS (RPM-basiert)
+        // 🔹 ITEMS
         // =========================
         var itemCmd = new SqlCommand($@"
             SELECT TOP (@limitItems)
@@ -93,13 +94,14 @@ public class WebOrderDataProvider
                 i.[Unit Price]
             FROM {randomTable} r WITH (NOLOCK)
             INNER JOIN {itemTable} i WITH (NOLOCK)
-                ON r.[No_] = i.[No_]
-            WHERE r.[Random Profile No_] = 'DEFAULT'
+                ON r.[No] = i.[No_]
+            WHERE r.[Companyname] = @company
               AND r.[Type] = 3
             ORDER BY NEWID()
         ", conn);
 
         itemCmd.Parameters.AddWithValue("@limitItems", limitItems);
+        itemCmd.Parameters.AddWithValue("@company", company);
 
         using (var reader = await itemCmd.ExecuteReaderAsync())
         {

@@ -23,7 +23,7 @@ public class CreditMemoCustomerDataProvider
             FROM (
                 SELECT DISTINCT [Sell-to Customer No_]
                 FROM {table} WITH (NOLOCK)
-                WHERE [Sell-to Customer No_] <> ''
+                WHERE [Sell-to Customer No_] <> ''                
             ) t
             ORDER BY NEWID()
         ";

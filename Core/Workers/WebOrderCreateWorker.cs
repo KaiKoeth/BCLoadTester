@@ -174,6 +174,33 @@ public class WebOrderCreateWorker : BaseWorker
                 await Task.Delay(200, token);
             }
         }
+        else
+        {
+            // =========================
+            // 🔥 IN ORDER STATUS POOL ADDEN
+            // =========================
+            try
+            {
+                if (payload.TryGetValue("sellToCustomerNo", out var custObj))
+                {
+                    string? customerNo = custObj switch
+                    {
+                        JsonElement je => je.GetString(),
+                        string s => s,
+                        _ => custObj?.ToString()
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(customerNo))
+                    {
+                        _orderStatusPool.Add(customerNo);
+                    }
+                }
+            }
+            catch
+            {
+                // bewusst ignorieren → darf Loadtest nicht stören
+            }
+        }
 
         return response;
     }

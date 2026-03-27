@@ -11,13 +11,6 @@ public class OrderStatusPool
             if (_set.Add(customerNo))
             {
                 _list.Add(customerNo);
-
-                if (_list.Count > 10000)
-                {
-                    var removed = _list[0];
-                    _list.RemoveAt(0);
-                    _set.Remove(removed);
-                }
             }
         }
     }
@@ -45,7 +38,7 @@ public class OrderStatusPool
         }
     }
 
-    // 🔥 NEU
+    // 🔥 BEHALTEN, aber NICHT destruktiv
     public string? TakeRandom()
     {
         lock (_lock)
@@ -53,13 +46,8 @@ public class OrderStatusPool
             if (_list.Count == 0)
                 return null;
 
-            var index = Random.Shared.Next(_list.Count);
-            var value = _list[index];
-
-            _list.RemoveAt(index);
-            _set.Remove(value);
-
-            return value;
+            // 🔥 kein Remove mehr
+            return _list[Random.Shared.Next(_list.Count)];
         }
     }
 
