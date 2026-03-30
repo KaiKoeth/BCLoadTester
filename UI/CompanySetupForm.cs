@@ -101,7 +101,10 @@ public class CompanySetupForm : Form
     private void CompanySetupForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
         if (!_isDirty)
+        {
+            this.DialogResult = DialogResult.Cancel; // 🔥 NEU
             return;
+        }
 
         var result = MessageBox.Show(
             "There are unsaved changes.\n\nDo you want to save them?",
@@ -120,6 +123,9 @@ public class CompanySetupForm : Form
         {
             SaveChanges();
         }
+
+        // 🔥 WICHTIG: DialogResult setzen
+        this.DialogResult = DialogResult.OK;
     }
 
     // =========================

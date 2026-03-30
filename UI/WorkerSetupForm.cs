@@ -49,7 +49,7 @@ public class WorkerSetupForm : Form
         };
         grid.Columns.Add(enabledCol);
 
-        // 🔥 NEU: Buffer Factor
+        // 🔥 Buffer Factor
         var bufferCol = new DataGridViewTextBoxColumn
         {
             Name = "buffer",
@@ -77,8 +77,12 @@ public class WorkerSetupForm : Form
 
     private void WorkerSetupForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
+        // 🔥 KEINE Änderungen → kein Reload
         if (!_isDirty)
+        {
+            this.DialogResult = DialogResult.Cancel;
             return;
+        }
 
         var result = MessageBox.Show(
             "There are unsaved changes.\n\nDo you want to save them?",
@@ -97,6 +101,9 @@ public class WorkerSetupForm : Form
         {
             Save();
         }
+
+        // 🔥 WICHTIG: Änderungen vorhanden → OK zurückgeben
+        this.DialogResult = DialogResult.OK;
     }
 
     // =========================
@@ -139,11 +146,11 @@ public class WorkerSetupForm : Form
 
             if (double.TryParse(bufferText, out double buffer))
             {
-                worker.bufferFactor = Math.Max(1.0, buffer); // min 1.0
+                worker.bufferFactor = Math.Max(1.0, buffer);
             }
             else
             {
-                worker.bufferFactor = 1.2; // fallback
+                worker.bufferFactor = 1.2;
             }
         }
 

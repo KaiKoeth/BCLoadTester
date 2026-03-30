@@ -19,7 +19,7 @@ public class AppConfig
     public List<WorkerConfig> workers { get; set; }
     public List<Company> companies { get; set; } = new();
 
-    public string loadTestTableName { get; set; } = "BC_Loadtest";
+    public string loadTestTableName { get; set; } = "BC Loadtest Protocol";
 
     public string BuildConnectionString()
     {

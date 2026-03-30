@@ -206,8 +206,17 @@ public partial class LoadTestDashboard : Form
                 return;
             }
 
-            new SetupSelectionForm(_config).ShowDialog(this);
-            ReloadConfig();
+            var dlg = new SetupSelectionForm(_config);
+
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                ReloadConfig();
+            }
+            else
+            {
+                lblStatus.Text = "No changes";
+                lblStatus.ForeColor = Color.Gray;
+            }
         };
 
         btnLoad.Click += async (s, e) => await LoadDataAsync();
@@ -1073,6 +1082,11 @@ public partial class LoadTestDashboard : Form
 
         _allRows.Clear();
 
+        var enabledWorkers = _config.workers
+            .Where(w => w.enabled)
+            .Select(w => w.type)
+            .ToHashSet();
+
         foreach (var companyGroup in stats.GroupBy(s => s.Company))
         {
             var companyName = companyGroup.Key;
@@ -1081,6 +1095,7 @@ public partial class LoadTestDashboard : Form
                 ? previousState[companyName]
                 : false;
 
+
             // 🔹 Gruppenzeile
             _allRows.Add(new DashboardRow
             {
@@ -1088,7 +1103,8 @@ public partial class LoadTestDashboard : Form
                 IsGroup = true,
                 IsExpanded = isExpanded,
 
-                RPM = companyGroup.Sum(x => ExtractTotalRpm(x.Worker, x.Rpm)),
+                RPM = GetConfiguredCompanyRpm(companyName),
+
                 Requests = companyGroup.Sum(x => x.Requests),
                 Errors = companyGroup.Sum(x => x.Errors),
                 AvgMs = companyGroup.Average(x => x.AvgMs),
@@ -1636,11 +1652,24 @@ public partial class LoadTestDashboard : Form
             using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
             await conn.OpenAsync();
 
+            string? currentRun = null;
+
+            var runCmd = conn.CreateCommand();
+            runCmd.CommandText = @"
+                    SELECT TOP(1) EventClass 
+                    FROM [Test Protocol MAC] 
+                    WHERE EventClass LIKE 'START%' 
+                    ORDER BY [Entry No_] DESC";
+
+            var result = await runCmd.ExecuteScalarAsync();
+            currentRun = result?.ToString();
+            currentRun ??= "UNKNOWN";
+
             // =========================
             // 🔥 TABLE NAME (DYNAMIC)
             // =========================
             var tableName = string.IsNullOrWhiteSpace(_config.loadTestTableName)
-                ? "BC_Loadtest"
+                ? "BC Loadtest Protocol"
                 : _config.loadTestTableName.Trim();
 
             // 🔒 Minimaler Schutz
@@ -1655,6 +1684,7 @@ public partial class LoadTestDashboard : Form
         BEGIN
             CREATE TABLE [{tableName}](
                 [Id] INT IDENTITY(1,1) PRIMARY KEY,
+                [Act. Run] NVARCHAR(20),
                 [Timestamp] DATETIME2,
                 [StartTime] DATETIME2,
                 [StopTime] DATETIME2,
@@ -1685,10 +1715,11 @@ public partial class LoadTestDashboard : Form
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = $@"
         INSERT INTO [{tableName}]
-        ([Timestamp],[StartTime],[StopTime],[Company],[Worker],[RPM],[Requests],[Errors],[RPS],[AvgMs],[MaxMs],[PoolSize],[BigOrders])
+        ([Act. Run],[Timestamp],[StartTime],[StopTime],[Company],[Worker],[RPM],[Requests],[Errors],[RPS],[AvgMs],[MaxMs],[PoolSize],[BigOrders])
         VALUES
-        (@ts,@start,@stop,@company,@worker,@rpm,@req,@err,@rps,@avg,@max,@pool,@big)";
+        (@run,@ts,@start,@stop,@company,@worker,@rpm,@req,@err,@rps,@avg,@max,@pool,@big)";
 
+                cmd.Parameters.AddWithValue("@run", (object?)currentRun ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@ts", DateTime.UtcNow);
                 cmd.Parameters.AddWithValue("@start", _startTime ?? DateTime.UtcNow);
                 cmd.Parameters.AddWithValue("@stop", _stopTime ?? DateTime.UtcNow);
@@ -1772,9 +1803,18 @@ public partial class LoadTestDashboard : Form
         if (_config == null)
             return 0;
 
+        var enabledWorkers = _config.workers
+            .Where(w => w.enabled)
+            .Select(w => w.type)
+            .ToHashSet();
+
         return _config.companies
             .Where(c => c.enabled)
-            .Sum(c => c.rpm.Values.Sum());
+            .Sum(c =>
+                c.rpm
+                    .Where(r => enabledWorkers.Contains(r.Key))
+                    .Sum(r => r.Value)
+            );
     }
     private void UpdateConfiguredRpmLabel()
     {
@@ -1802,7 +1842,9 @@ public partial class LoadTestDashboard : Form
                 IsGroup = true,
                 IsExpanded = isExpanded,
 
-                RPM = company.rpm.Values.Sum(),
+                RPM = company.rpm
+                    .Where(r => _config.workers.Any(w => w.enabled && w.type == r.Key))
+                    .Sum(r => r.Value),
                 Requests = 0,
                 Errors = 0,
                 AvgMs = 0,
@@ -1961,6 +2003,25 @@ public partial class LoadTestDashboard : Form
         var worker = _config.workers.FirstOrDefault(w => w.type == workerType);
 
         return worker?.bufferFactor > 0 ? worker.bufferFactor : 1.2;
+    }
+
+    private long GetConfiguredCompanyRpm(string companyName)
+    {
+        if (_config == null)
+            return 0;
+
+        var company = _config.companies.FirstOrDefault(c => c.name == companyName);
+        if (company == null)
+            return 0;
+
+        var enabledWorkers = _config.workers
+            .Where(w => w.enabled)
+            .Select(w => w.type)
+            .ToHashSet();
+
+        return company.rpm
+            .Where(r => enabledWorkers.Contains(r.Key))
+            .Sum(r => (long)r.Value);
     }
 
 }

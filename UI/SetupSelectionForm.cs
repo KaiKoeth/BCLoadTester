@@ -7,6 +7,9 @@ public class SetupSelectionForm : Form
 {
     private AppConfig _config;
 
+    // 🔥 NEU: Change Tracking
+    private bool _changed = false;
+
     public SetupSelectionForm(AppConfig config)
     {
         _config = config;
@@ -58,22 +61,34 @@ public class SetupSelectionForm : Form
         };
 
         // =========================
-        // 🔥 EVENTS
+        // 🔥 EVENTS (JETZT MIT CHANGE TRACKING)
         // =========================
 
         btnConnection.Click += (s, e) =>
         {
-            new ConnectionSetupForm(_config).ShowDialog(this);
+            var dlg = new ConnectionSetupForm(_config);
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                _changed = true; // 🔥 NEU
+            }
         };
 
         btnCompany.Click += (s, e) =>
         {
-            new CompanySetupForm(_config).ShowDialog(this);
+            var dlg = new CompanySetupForm(_config);
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                _changed = true; // 🔥 NEU
+            }
         };
 
         btnWorker.Click += (s, e) =>
         {
-            new WorkerSetupForm(_config).ShowDialog(this);
+            var dlg = new WorkerSetupForm(_config);
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                _changed = true; // 🔥 NEU
+            }
         };
 
         btnSaveConfig.Click += (s, e) => SaveConfig();
@@ -109,7 +124,11 @@ public class SetupSelectionForm : Form
         try
         {
             ConfigLoader.SaveAs(_config, dialog.FileName);
+
             MessageBox.Show("Config saved successfully.", "Success");
+
+            // 🔥 OPTIONAL: zählt als Änderung
+            _changed = true;
         }
         catch (Exception ex)
         {
@@ -118,7 +137,7 @@ public class SetupSelectionForm : Form
     }
 
     // =========================
-    // 📂 LOAD CONFIG (MIT WARNUNG!)
+    // 📂 LOAD CONFIG
     // =========================
     private void LoadConfig()
     {
@@ -144,7 +163,7 @@ public class SetupSelectionForm : Form
         {
             var newConfig = ConfigLoader.LoadFrom(dialog.FileName);
 
-            // 🔥 WICHTIG: Werte übernehmen (Referenz behalten!)
+            // 🔥 Werte übernehmen
             _config.serviceRoot = newConfig.serviceRoot;
             _config.apiRoot = newConfig.apiRoot;
             _config.username = newConfig.username;
@@ -167,10 +186,25 @@ public class SetupSelectionForm : Form
             MessageBox.Show(
                 "Config loaded successfully.\nPlease reload data in dashboard.",
                 "Success");
+
+            // 🔥 WICHTIG: Änderung markieren
+            _changed = true;
         }
         catch (Exception ex)
         {
             MessageBox.Show(ex.Message, "Load Error");
         }
+    }
+
+    // =========================
+    // 🔥 WICHTIG: DialogResult steuern
+    // =========================
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+
+        this.DialogResult = _changed
+            ? DialogResult.OK
+            : DialogResult.Cancel;
     }
 }
