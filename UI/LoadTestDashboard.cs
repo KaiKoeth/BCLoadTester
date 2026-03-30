@@ -36,6 +36,7 @@ public partial class LoadTestDashboard : Form
     private const int PoolCriticalThreshold = 250;
     private NumericUpDown numTestDuration;
     private NumericUpDown numRemainingMinutes;
+    private DateTime? _endTime;
 
     private PerformanceCounter _cpuCounter;
     private Process _process;
@@ -56,22 +57,13 @@ public partial class LoadTestDashboard : Form
     private Dictionary<string, OrderStatusPool> _orderStatusCache = new();
     private Dictionary<string, WebOrderPayloadPool> _webOrderPoolCache = new();
     private Dictionary<(string Company, string Worker), int> _workerCounts = new();
+    private Label lblRemainingTime;
 
-    System.Windows.Forms.Timer? _loadingTimer;
-    string _loadingPhase = "Loading";
     int _loadedCompanies = 0;
     int _totalCompanies = 0;
 
     public LoadTestDashboard()
     {
-        _client = new HttpClient(new SocketsHttpHandler
-        {
-            MaxConnectionsPerServer = 200,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
-            EnableMultipleHttp2Connections = true
-        });
-
         InitializeComponent();
         InitializeApp();
 
@@ -158,11 +150,18 @@ public partial class LoadTestDashboard : Form
         {
             int newValue = (int)numRemainingMinutes.Value;
 
-            // 🔥 immer übernehmen (auch während Test)
+            if (_endTime != null)
+            {
+                int delta = newValue - _remainingMinutes;
+
+                // 🔥 verschiebt die bestehende Endzeit
+                _endTime = _endTime.Value.AddMinutes(delta);
+            }
+
             _remainingMinutes = newValue;
+
             UpdateEndTime();
 
-            // 🔥 wenn auf 0 gesetzt → sofort stoppen
             if (_controller != null && _remainingMinutes <= 0)
             {
                 btnStop_Click(this, EventArgs.Empty);
@@ -311,6 +310,17 @@ public partial class LoadTestDashboard : Form
         });
 
         durationBar.Controls.Add(numRemainingMinutes);
+
+        // 🔥 NEU: Sekundengenaue Restzeit
+        lblRemainingTime = new Label
+        {
+            Text = "00:00",
+            Width = 60,
+            Margin = new Padding(10, 4, 0, 0),
+            Font = new Font("Segoe UI", 9, FontStyle.Bold)
+        };
+
+        durationBar.Controls.Add(lblRemainingTime);
 
         // 🔹 Endzeit (GANZ RECHTS!)
         durationBar.Controls.Add(lblEndTime);
@@ -463,15 +473,35 @@ public partial class LoadTestDashboard : Form
 
             lblRuntime.Text = $"Runtime: {runtime:hh\\:mm\\:ss}";
 
+            // =========================
+            // 🔥 RESTZEIT MM:SS
+            // =========================
+            // =========================
+            // 🔥 RESTZEIT (DYNAMISCH!)
+            // =========================
+            if (_endTime != null)
+            {
+                var remaining = _endTime.Value - DateTime.Now;
+
+                if (remaining < TimeSpan.Zero)
+                    remaining = TimeSpan.Zero;
+
+                lblRemainingTime.Text = remaining.ToString(@"mm\:ss");
+
+                if (remaining.TotalSeconds < 30)
+                    lblRemainingTime.ForeColor = Color.Red;
+                else
+                    lblRemainingTime.ForeColor = Color.Black;
+            }
+            else
+            {
+                lblRemainingTime.Text = "00:00";
+            }
+
             var stats = _stats.GetStats();
 
-            // 🔥 Snapshot + reuse
             _cachedStats.Clear();
-
-            foreach (var stat in stats)
-            {
-                _cachedStats.Add(stat);
-            }
+            _cachedStats.AddRange(stats);
 
             // 🔥 schneller als LINQ
             _cachedStats.Sort(static (a, b) =>
@@ -542,6 +572,7 @@ public partial class LoadTestDashboard : Form
 
         _stats = new Statistics();
         _startTime = DateTime.Now;
+        _endTime = _startTime.Value.AddMinutes(_remainingMinutes);
         _stopTime = null; // 👈 wichtig
 
         lblStartTime.Text = $"Start: {_startTime:HH:mm:ss}";
@@ -823,6 +854,8 @@ public partial class LoadTestDashboard : Form
             lblStatus.ForeColor = Color.Black;
             numRemainingMinutes.Visible = false;
             lblEndTime.Visible = false;
+            _endTime = null;
+            lblRemainingTime.Text = "00:00";
         }
         catch (Exception ex)
         {
@@ -1159,24 +1192,6 @@ public partial class LoadTestDashboard : Form
         }
     }
 
-    private long ExtractTotalRpm(string workerName, long workerRpm)
-    {
-        // erwartet Format: "OrderStatus (x3)"
-        var start = workerName.IndexOf("(x");
-        var end = workerName.IndexOf(")");
-
-        if (start >= 0 && end > start)
-        {
-            var numberText = workerName.Substring(start + 2, end - start - 2);
-
-            if (int.TryParse(numberText, out int count))
-            {
-                return workerRpm * count;
-            }
-        }
-
-        return workerRpm;
-    }
 
     private void RefreshGrid(TimeSpan runtime)
     {
@@ -1452,21 +1467,6 @@ public partial class LoadTestDashboard : Form
         return idx > 0 ? worker.Substring(0, idx) : worker;
     }
 
-    private int ExtractParallelCount(string workerName)
-    {
-        var start = workerName.IndexOf("(x");
-        var end = workerName.IndexOf(")");
-
-        if (start >= 0 && end > start)
-        {
-            var numberText = workerName.Substring(start + 2, end - start - 2);
-
-            if (int.TryParse(numberText, out int count))
-                return count;
-        }
-
-        return 1;
-    }
 
     private void ReloadConfig()
     {
@@ -1558,24 +1558,6 @@ public partial class LoadTestDashboard : Form
         }
     }
 
-    private int ExtractPoolSize(string workerDisplay)
-    {
-        if (string.IsNullOrWhiteSpace(workerDisplay))
-            return int.MaxValue;
-
-        var start = workerDisplay.LastIndexOf("(");
-        var end = workerDisplay.LastIndexOf(")");
-
-        if (start >= 0 && end > start)
-        {
-            var number = workerDisplay.Substring(start + 1, end - start - 1);
-
-            if (int.TryParse(number, out int value))
-                return value;
-        }
-
-        return int.MaxValue;
-    }
 
     private void LoadTestDashboard_FormClosing(object? sender, FormClosingEventArgs e)
     {
@@ -1652,18 +1634,23 @@ public partial class LoadTestDashboard : Form
             using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
             await conn.OpenAsync();
 
-            string? currentRun = null;
-
+            string? testProfileNo = null;
             var runCmd = conn.CreateCommand();
-            runCmd.CommandText = @"
-                    SELECT TOP(1) EventClass 
-                    FROM [Test Protocol MAC] 
-                    WHERE EventClass LIKE 'START%' 
-                    ORDER BY [Entry No_] DESC";
+            runCmd.CommandText = @"SELECT TOP(1) [Test Profile No_] FROM [Client MAC] (NOLOCK)";
 
             var result = await runCmd.ExecuteScalarAsync();
-            currentRun = result?.ToString();
-            currentRun ??= "UNKNOWN";
+            testProfileNo = result?.ToString();
+            testProfileNo ??= "UNKNOWN";
+
+
+            string? runNo = null;
+
+            runCmd = conn.CreateCommand();
+            runCmd.CommandText = @"SELECT TOP(1) SUBSTRING(EventClass,7,4) from [Test Protocol MAC] (NOLOCK) where EventClass like 'START%' order by [Entry No_] desc";
+
+            result = await runCmd.ExecuteScalarAsync();
+            runNo = result?.ToString();
+            runNo ??= "0000";
 
             // =========================
             // 🔥 TABLE NAME (DYNAMIC)
@@ -1684,7 +1671,8 @@ public partial class LoadTestDashboard : Form
         BEGIN
             CREATE TABLE [{tableName}](
                 [Id] INT IDENTITY(1,1) PRIMARY KEY,
-                [Act. Run] NVARCHAR(20),
+                [Testprofile No_] NVARCHAR(50),
+                [Run No_] NVARCHAR(4),
                 [Timestamp] DATETIME2,
                 [StartTime] DATETIME2,
                 [StopTime] DATETIME2,
@@ -1715,11 +1703,12 @@ public partial class LoadTestDashboard : Form
                 var cmd = conn.CreateCommand();
                 cmd.CommandText = $@"
         INSERT INTO [{tableName}]
-        ([Act. Run],[Timestamp],[StartTime],[StopTime],[Company],[Worker],[RPM],[Requests],[Errors],[RPS],[AvgMs],[MaxMs],[PoolSize],[BigOrders])
+        ([Testprofile No_],[Run No_],[Timestamp],[StartTime],[StopTime],[Company],[Worker],[RPM],[Requests],[Errors],[RPS],[AvgMs],[MaxMs],[PoolSize],[BigOrders])
         VALUES
-        (@run,@ts,@start,@stop,@company,@worker,@rpm,@req,@err,@rps,@avg,@max,@pool,@big)";
+        (@TestProfileNo,@RunNo,@ts,@start,@stop,@company,@worker,@rpm,@req,@err,@rps,@avg,@max,@pool,@big)";
 
-                cmd.Parameters.AddWithValue("@run", (object?)currentRun ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@TestProfileNo", (object?)testProfileNo ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@RunNo", (object?)runNo ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@ts", DateTime.UtcNow);
                 cmd.Parameters.AddWithValue("@start", _startTime ?? DateTime.UtcNow);
                 cmd.Parameters.AddWithValue("@stop", _stopTime ?? DateTime.UtcNow);
@@ -1796,6 +1785,8 @@ public partial class LoadTestDashboard : Form
         _loadedDurationMinutes = 0;
         numTestDuration.Value = 60;
         numRemainingMinutes.Value = 60;
+        _endTime = null;
+        lblRemainingTime.Text = "00:00";
     }
 
     private int CalculateConfiguredRpm()
@@ -1987,15 +1978,13 @@ public partial class LoadTestDashboard : Form
 
     private void UpdateEndTime()
     {
-        if (_startTime == null)
+        if (_endTime == null)
         {
             lblEndTime.Text = "";
             return;
         }
 
-        var endTime = _startTime.Value.AddMinutes(_loadedDurationMinutes);
-
-        lblEndTime.Text = $"Ende: {endTime:HH:mm}";
+        lblEndTime.Text = $"Ende: {_endTime:HH:mm}";
     }
 
     private double GetBufferFactor(string workerType)
