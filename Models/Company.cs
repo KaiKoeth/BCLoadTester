@@ -6,6 +6,8 @@ public class Company
 
     public Dictionary<string, int> rpm { get; set; }
     public WebOrderConfig webOrderConfig { get; set; }
+    public string? serviceRoot { get; set; }
+    public string? apiRoot { get; set; }
 }
 
 public class WebOrderConfig

@@ -30,7 +30,11 @@ public partial class LoadTestDashboard : Form
     Label lblTotalRequests;
     Label lblTotalErrors;
     Label lblStatus;
+    Label lblTestProfile;
+    Label lblRunNo;
     private Label lblEndTime;
+    private string? _currentTestProfileNo;
+    private string? _currentRunNo;
     ProgressBar progressLoading;
     private const int PoolWarningThreshold = 500;
     private const int PoolCriticalThreshold = 250;
@@ -170,6 +174,9 @@ public partial class LoadTestDashboard : Form
 
         _remainingMinutes = 60;
         _loadedDurationMinutes = 0; // noch nichts geladen
+        lblTestProfile = new Label { Text = "Testprofile: -", Width = 260, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+        lblRunNo = new Label { Text = "", Width = 0, Visible = false };
+
         btnStart = new Button { Text = "▶ Start", Width = 120, Height = 50, BackColor = Color.LightGreen };
         btnStop = new Button { Text = "■ Stop", Width = 120, Height = 50, BackColor = Color.IndianRed };
         btnReset = new Button { Text = "↺ Reset", Width = 120, Height = 50, BackColor = Color.Khaki };
@@ -421,8 +428,12 @@ public partial class LoadTestDashboard : Form
         statsBar.Controls.Add(lblStopTime);
         statsBar.Controls.Add(lblRuntime);
         statsBar.Controls.Add(lblConfiguredRpm);
+        statsBar.Controls.Add(new Label { Width = 20 }); // kleiner Abstand
 
-        statsBar.Controls.Add(new Label { Width = 30 });
+        statsBar.Controls.Add(lblTestProfile);
+        statsBar.Controls.Add(lblRunNo);
+
+        statsBar.Controls.Add(new Label { Width = 30 }); // Abstand zu totals
 
         statsBar.Controls.Add(lblTotalRpm);
         statsBar.Controls.Add(lblTotalRps);
@@ -563,6 +574,14 @@ public partial class LoadTestDashboard : Form
         }
         SetUiState(true);
 
+        // 🔥 NEU: Protokoll prüfen / löschen
+        if (!await CheckAndCleanupProtocolTableOnStartAsync())
+        {
+            lblStatus.Text = "Start cancelled";
+            lblStatus.ForeColor = Color.Gray;
+            return;
+        }
+
         var authToken = Convert.ToBase64String(
             System.Text.Encoding.ASCII.GetBytes($"{_config.username}:{_config.password}")
         );
@@ -585,10 +604,12 @@ public partial class LoadTestDashboard : Form
 
         foreach (var company in enabledCompanies)
         {
+            var (serviceRoot, apiRoot) = GetApiConfig(company);
             List<string>? invoiceCustomers = null;
             List<string>? creditMemoCustomers = null;
             OrderStatusPool? orderStatusPool = null;
             WebOrderPayloadPool? webOrderPool = null;
+            lblStatus.Text = $"API: {serviceRoot}{apiRoot} ({company.name})";
 
             bool hasRequiredData = true;
 
@@ -655,7 +676,7 @@ public partial class LoadTestDashboard : Form
 
                                 workers.Add(new EmailSearchWorker(
                                     _client, emailCustomers,
-                                    _config.serviceRoot, _config.apiRoot,
+                                    serviceRoot, apiRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -670,7 +691,7 @@ public partial class LoadTestDashboard : Form
 
                                 workers.Add(new PhoneticSearchWorker(
                                     _client, pmcCustomers,
-                                    _config.serviceRoot,
+                                    serviceRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -685,7 +706,7 @@ public partial class LoadTestDashboard : Form
 
                                 workers.Add(new CustomerCreateWorker(
                                     _client, createCustomers,
-                                    _config.serviceRoot, _config.apiRoot,
+                                    serviceRoot, apiRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -700,7 +721,7 @@ public partial class LoadTestDashboard : Form
 
                                 workers.Add(new ShipToAddressCreateWorker(
                                     _client, shipToCustomers,
-                                    _config.serviceRoot, _config.apiRoot,
+                                    serviceRoot, apiRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -716,7 +737,7 @@ public partial class LoadTestDashboard : Form
                                 workers.Add(new CustomerHistoryWorker(
                                     _client,
                                     historyCustomers,
-                                    _config.serviceRoot, _config.apiRoot,
+                                    serviceRoot, apiRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -730,7 +751,7 @@ public partial class LoadTestDashboard : Form
                                     _client,
                                     orderStatusPool,
                                     webOrderPool,
-                                    _config.serviceRoot, _config.apiRoot,
+                                    serviceRoot, apiRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -753,7 +774,7 @@ public partial class LoadTestDashboard : Form
                                 workers.Add(new GetInvoiceDetailsWorker(
                                     _client,
                                     invoiceCustomers,
-                                    _config.serviceRoot,
+                                    serviceRoot, apiRoot,
                                     company.guid, company.name,
                                     workerRpm,
                                     _stats, workerKey));
@@ -768,7 +789,7 @@ public partial class LoadTestDashboard : Form
                                 workers.Add(new GetCreMemoDetailsWorker(
                                     _client,
                                     creditMemoCustomers,
-                                    _config.serviceRoot, _config.apiRoot,
+                                    serviceRoot, apiRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -781,7 +802,7 @@ public partial class LoadTestDashboard : Form
                                 workers.Add(new OrderStatusWorker(
                                     _client,
                                     orderStatusPool,
-                                    _config.serviceRoot, _config.apiRoot,
+                                     serviceRoot, apiRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
@@ -897,7 +918,7 @@ public partial class LoadTestDashboard : Form
         // =========================
         // 🔥 PRE-CHECK
         // =========================
-        lblStatus.Text = "Testing connections...";
+        lblStatus.Text = "Testing SQL connections...";
         lblStatus.ForeColor = Color.DarkOrange;
 
         if (!await TestSqlConnectionAsync())
@@ -907,12 +928,6 @@ public partial class LoadTestDashboard : Form
             return;
         }
 
-        if (!await TestApiConnectionAsync())
-        {
-            lblStatus.Text = "API connection failed";
-            lblStatus.ForeColor = Color.Red;
-            return;
-        }
 
         try
         {
@@ -1084,6 +1099,9 @@ public partial class LoadTestDashboard : Form
 
             lblStatus.Text = "Data loaded successfully";
             lblStatus.ForeColor = Color.Green;
+
+            await CheckAndCleanupProtocolTableAsync();
+            Application.DoEvents();
         }
         catch (Exception ex)
         {
@@ -1532,8 +1550,7 @@ public partial class LoadTestDashboard : Form
                 Timeout = TimeSpan.FromSeconds(5)
             };
 
-            var url = _config.serviceRoot.TrimEnd('/') + _config.apiRoot;
-
+            // 🔐 Auth
             var auth = Convert.ToBase64String(
                 System.Text.Encoding.ASCII.GetBytes($"{_config.username}:{_config.password}")
             );
@@ -1541,12 +1558,58 @@ public partial class LoadTestDashboard : Form
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", auth);
 
-            var response = await client.GetAsync(url);
+            var companies = _config.companies.Where(c => c.enabled);
 
-            if (!response.IsSuccessStatusCode)
+            foreach (var company in companies)
             {
-                MessageBox.Show($"API responded with {response.StatusCode}", "Warning");
-                return false;
+                // 🔥 nur testen wenn auch wirklich Last kommt
+                bool hasWork = company.rpm != null && company.rpm.Any(r => r.Value > 0);
+
+                if (!hasWork)
+                    continue;
+
+                string serviceRoot;
+                string apiRoot;
+
+                bool hasCompanyApi =
+                    !string.IsNullOrWhiteSpace(company.serviceRoot) &&
+                    !string.IsNullOrWhiteSpace(company.apiRoot);
+
+                if (hasCompanyApi)
+                {
+                    // ✅ Company API verwenden
+                    serviceRoot = company.serviceRoot!;
+                    apiRoot = company.apiRoot!;
+                }
+                else
+                {
+                    // ✅ Global fallback (gewünscht!)
+                    serviceRoot = _config.serviceRoot;
+                    apiRoot = _config.apiRoot;
+                }
+
+                // ❌ Safety Check
+                if (string.IsNullOrWhiteSpace(serviceRoot) || string.IsNullOrWhiteSpace(apiRoot))
+                {
+                    MessageBox.Show(
+                        $"No API configured for {company.name}",
+                        "API Config Error"
+                    );
+                    return false;
+                }
+
+                var url = serviceRoot.TrimEnd('/') + apiRoot;
+
+                var response = await client.GetAsync(url);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    MessageBox.Show(
+                        $"API failed for {company.name}: {response.StatusCode}\n\nURL: {url}",
+                        "API Error"
+                    );
+                    return false;
+                }
             }
 
             return true;
@@ -1557,7 +1620,6 @@ public partial class LoadTestDashboard : Form
             return false;
         }
     }
-
 
     private void LoadTestDashboard_FormClosing(object? sender, FormClosingEventArgs e)
     {
@@ -1608,8 +1670,20 @@ public partial class LoadTestDashboard : Form
             double rps = stats.Sum(s => s.Rps);
 
             // 🔥 Anzeige im Titel
-            this.Text =
-                $"BC LoadTester | CPU: {cpu:0.0}% | RAM: {ramMb:0} MB | RPS: {rps:0.0}";
+            var tp = lblTestProfile?.Text ?? "";
+            var run = lblRunNo?.Visible == true ? lblRunNo.Text : "";
+            var tpText = lblTestProfile?.Text;
+
+            if (!string.IsNullOrWhiteSpace(tpText) && !tpText.Contains("-"))
+            {
+                this.Text =
+                    $"BC LoadTester | CPU: {cpu:0.0}% | RAM: {ramMb:0} MB | RPS: {rps:0.0} | {tpText}";
+            }
+            else
+            {
+                this.Text =
+                    $"BC LoadTester | CPU: {cpu:0.0}% | RAM: {ramMb:0} MB | RPS: {rps:0.0}";
+            }
         }
         catch
         {
@@ -1634,23 +1708,8 @@ public partial class LoadTestDashboard : Form
             using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
             await conn.OpenAsync();
 
-            string? testProfileNo = null;
-            var runCmd = conn.CreateCommand();
-            runCmd.CommandText = @"SELECT TOP(1) [Test Profile No_] FROM [Client MAC] (NOLOCK)";
-
-            var result = await runCmd.ExecuteScalarAsync();
-            testProfileNo = result?.ToString();
-            testProfileNo ??= "UNKNOWN";
-
-
-            string? runNo = null;
-
-            runCmd = conn.CreateCommand();
-            runCmd.CommandText = @"SELECT TOP(1) SUBSTRING(EventClass,7,4) from [Test Protocol MAC] (NOLOCK) where EventClass like 'START%' order by [Entry No_] desc";
-
-            result = await runCmd.ExecuteScalarAsync();
-            runNo = result?.ToString();
-            runNo ??= "0000";
+            var testProfileNo = _currentTestProfileNo;
+            var runNo = _currentRunNo;
 
             // =========================
             // 🔥 TABLE NAME (DYNAMIC)
@@ -1707,9 +1766,10 @@ public partial class LoadTestDashboard : Form
         VALUES
         (@TestProfileNo,@RunNo,@ts,@start,@stop,@company,@worker,@rpm,@req,@err,@rps,@avg,@max,@pool,@big)";
 
-                cmd.Parameters.AddWithValue("@TestProfileNo", (object?)testProfileNo ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@RunNo", (object?)runNo ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@ts", DateTime.UtcNow);
+                cmd.Parameters.AddWithValue("@TestProfileNo",
+                    string.IsNullOrWhiteSpace(testProfileNo) ? DBNull.Value : testProfileNo);
+                cmd.Parameters.AddWithValue("@RunNo",
+                    string.IsNullOrWhiteSpace(runNo) ? DBNull.Value : runNo); cmd.Parameters.AddWithValue("@ts", DateTime.UtcNow);
                 cmd.Parameters.AddWithValue("@start", _startTime ?? DateTime.UtcNow);
                 cmd.Parameters.AddWithValue("@stop", _stopTime ?? DateTime.UtcNow);
                 cmd.Parameters.AddWithValue("@company", s.Company);
@@ -1738,11 +1798,19 @@ public partial class LoadTestDashboard : Form
         }
     }
 
-    private void btnReset_Click(object sender, EventArgs e)
+    private async void btnReset_Click(object sender, EventArgs e)
     {
 
         if (MessageBox.Show("Reset current results?", "Confirm", MessageBoxButtons.YesNo) != DialogResult.Yes)
             return;
+        // 🔥 DB Cleanup vor Reset
+        if (!await CheckAndCleanupProtocolTableOnStartAsync())
+        {
+            lblStatus.Text = "Reset cancelled";
+            lblStatus.ForeColor = Color.Gray;
+            return;
+        }
+
         // 🔥 Grid leeren            
         statsGrid.Rows.Clear();
 
@@ -1781,12 +1849,19 @@ public partial class LoadTestDashboard : Form
             _runtimeTimer.Stop();
             _runtimeTimer.Tick -= RuntimeTimer_Tick;
         }
+
+
         _remainingMinutes = 60;
         _loadedDurationMinutes = 0;
         numTestDuration.Value = 60;
         numRemainingMinutes.Value = 60;
         _endTime = null;
         lblRemainingTime.Text = "00:00";
+        lblTestProfile.Text = "TestProfile: -";
+        lblRunNo.Text = "RunNo: -";
+
+
+
     }
 
     private int CalculateConfiguredRpm()
@@ -2011,6 +2086,290 @@ public partial class LoadTestDashboard : Form
         return company.rpm
             .Where(r => enabledWorkers.Contains(r.Key))
             .Sum(r => (long)r.Value);
+    }
+
+    private (string serviceRoot, string apiRoot) GetApiConfig(Company company)
+    {
+        var serviceRoot = string.IsNullOrWhiteSpace(company.serviceRoot)
+            ? _config.serviceRoot
+            : company.serviceRoot;
+
+        var apiRoot = string.IsNullOrWhiteSpace(company.apiRoot)
+            ? _config.apiRoot
+            : company.apiRoot;
+
+        return (serviceRoot, apiRoot);
+    }
+
+    private async Task CheckAndCleanupProtocolTableAsync()
+    {
+        if (_config == null)
+            return;
+
+        try
+        {
+            var connectionString =
+                $"Server={_config.sqlServer},{_config.sqlPort};" +
+                $"Database={_config.database};" +
+                $"User Id={_config.dbUser};" +
+                $"Password={_config.dbPassword};" +
+                $"TrustServerCertificate=True;";
+
+            using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            // =========================
+            // 🔹 TestProfileNo holen
+            // =========================
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = @"SELECT TOP(1) [Test Profile No_] FROM [Client MAC] (NOLOCK)";
+            var testProfileNo = (await cmd.ExecuteScalarAsync())?.ToString();
+
+            if (string.IsNullOrWhiteSpace(testProfileNo))
+                return;
+
+            // =========================
+            // 🔹 RunNo ermitteln (OPEN RUN LOGIC)
+            // =========================
+
+            // 🔹 1. letzten START für dieses Profil holen
+            cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+    SELECT TOP(1) SUBSTRING(EventClass,7,4)
+    FROM [Test Protocol MAC] (NOLOCK)
+    WHERE EventClass LIKE 'START%'
+      AND [Test Profile No_] = @tp
+    ORDER BY [Entry No_] DESC";
+
+            cmd.Parameters.AddWithValue("@tp", testProfileNo);
+
+            var lastStartObj = await cmd.ExecuteScalarAsync();
+            string? lastStartRun = lastStartObj?.ToString();
+
+            string runNo;
+
+            // =========================
+            // 🔥 FALL 1: Es gibt START für Profil
+            // =========================
+            if (!string.IsNullOrWhiteSpace(lastStartRun))
+            {
+                // 🔹 prüfen ob STOP existiert
+                cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+        SELECT COUNT(*)
+        FROM [Test Protocol MAC] (NOLOCK)
+        WHERE EventClass = @stopEvent
+          AND [Test Profile No_] = @tp";
+
+                cmd.Parameters.AddWithValue("@tp", testProfileNo);
+                cmd.Parameters.AddWithValue("@stopEvent", $"STOP_{lastStartRun}");
+
+                var stopCount = (int)await cmd.ExecuteScalarAsync();
+
+                if (stopCount == 0)
+                {
+                    // 🔥 OFFENER RUN → 그대로 verwenden
+                    runNo = lastStartRun;
+                }
+                else
+                {
+                    // 🔥 RUN abgeschlossen → +1
+                    if (int.TryParse(lastStartRun, out var lastNo))
+                        runNo = (lastNo + 1).ToString("D4");
+                    else
+                        runNo = "0001";
+                }
+            }
+            else
+            {
+                // =========================
+                // 🔥 FALL 2: kein START für Profil → global fallback
+                // =========================
+                cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+        SELECT TOP(1) SUBSTRING(EventClass,7,4)
+        FROM [Test Protocol MAC] (NOLOCK)
+        WHERE EventClass LIKE 'START%'
+        ORDER BY [Entry No_] DESC";
+
+                var lastGlobal = (await cmd.ExecuteScalarAsync())?.ToString();
+
+                if (!string.IsNullOrWhiteSpace(lastGlobal) && int.TryParse(lastGlobal, out var lastNo))
+                    runNo = (lastNo + 1).ToString("D4");
+                else
+                    runNo = "0001";
+            }
+
+            // =========================
+            // 🔹 Table Name (dynamisch wie bei Save!)
+            // =========================
+            var tableName = string.IsNullOrWhiteSpace(_config.loadTestTableName)
+                ? "BC Loadtest Protocol"
+                : _config.loadTestTableName.Trim();
+
+            tableName = tableName.Replace("[", "").Replace("]", "");
+
+            // =========================
+            // 🔹 Prüfen ob Einträge existieren
+            // =========================
+            cmd = conn.CreateCommand();
+            cmd.CommandText = $@"
+            SELECT COUNT(*)
+            FROM [{tableName}]
+            WHERE [Testprofile No_] = @tp
+              AND [Run No_] = @run";
+
+            cmd.Parameters.AddWithValue("@tp", testProfileNo);
+            cmd.Parameters.AddWithValue("@run", runNo);
+
+            lblStatus.Text = $"Testprofile {testProfileNo} / Run {runNo} gefunden";
+            lblStatus.ForeColor = Color.DarkGreen;
+
+            lblTestProfile.Text = $"Testprofile {testProfileNo} | Run {runNo}";
+            lblRunNo.Visible = false;
+
+            _currentTestProfileNo = testProfileNo;
+            _currentRunNo = runNo;
+
+            var count = (int)await cmd.ExecuteScalarAsync();
+
+            if (count == 0)
+                return;
+
+            // =========================
+            // 🔥 USER FRAGEN
+            // =========================
+            var result = MessageBox.Show(
+                $"Es existieren noch {count} Einträge in der [{tableName}] Tabelle\n\n" +
+                $"TestProfile: {testProfileNo}\nRunNo: {runNo}\n\n" +
+                $"Diese Einträge löschen?",
+                "Vorhandene Testergebnisse",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
+            );
+
+            if (result != DialogResult.Yes)
+                return;
+
+            // =========================
+            // 🔥 DELETE
+            // =========================
+            cmd = conn.CreateCommand();
+            cmd.CommandText = $@"
+            DELETE FROM [{tableName}]
+            WHERE [Testprofile No_] = @tp
+              AND [Run No_] = @run";
+
+            cmd.Parameters.AddWithValue("@tp", testProfileNo);
+            cmd.Parameters.AddWithValue("@run", runNo);
+
+            var deleted = await cmd.ExecuteNonQueryAsync();
+
+            MessageBox.Show(
+                $"{deleted} Einträge wurden gelöscht.",
+                "Bereinigung abgeschlossen",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Fehler beim Prüfen/Löschen:\n{ex.Message}", "DB Error");
+        }
+
+    }
+    private async Task<bool> CheckAndCleanupProtocolTableOnStartAsync()
+    {
+        if (_config == null)
+            return true;
+
+        if (string.IsNullOrWhiteSpace(_currentTestProfileNo) ||
+            string.IsNullOrWhiteSpace(_currentRunNo))
+            return true; // nichts zu prüfen
+
+        try
+        {
+            var connectionString =
+                $"Server={_config.sqlServer},{_config.sqlPort};" +
+                $"Database={_config.database};" +
+                $"User Id={_config.dbUser};" +
+                $"Password={_config.dbPassword};" +
+                $"TrustServerCertificate=True;";
+
+            using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            var tableName = string.IsNullOrWhiteSpace(_config.loadTestTableName)
+                ? "BC Loadtest Protocol"
+                : _config.loadTestTableName.Trim();
+
+            tableName = tableName.Replace("[", "").Replace("]", "");
+
+            // =========================
+            // 🔍 COUNT
+            // =========================
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = $@"
+            SELECT COUNT(*)
+            FROM [{tableName}]
+            WHERE [Testprofile No_] = @tp
+              AND [Run No_] = @run";
+
+            cmd.Parameters.AddWithValue("@tp", _currentTestProfileNo);
+            cmd.Parameters.AddWithValue("@run", _currentRunNo);
+
+            var count = (int)await cmd.ExecuteScalarAsync();
+
+            if (count == 0)
+                return true;
+
+            // =========================
+            // ❗ USER FRAGEN
+            // =========================
+            var dialogResult = MessageBox.Show(
+                $"Es existieren noch {count} Einträge für:\n\n" +
+                $"TestProfile: {_currentTestProfileNo}\n" +
+                $"RunNo: {_currentRunNo}\n\n" +
+                $"Diese Einträge löschen?",
+                "Vorhandene Testergebnisse",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning
+            );
+
+            if (dialogResult == DialogResult.Cancel)
+                return false;
+
+            if (dialogResult == DialogResult.No)
+                return true;
+
+            // =========================
+            // 🧹 DELETE
+            // =========================
+            cmd = conn.CreateCommand();
+            cmd.CommandText = $@"
+            DELETE FROM [{tableName}]
+            WHERE [Testprofile No_] = @tp
+              AND [Run No_] = @run";
+
+            cmd.Parameters.AddWithValue("@tp", _currentTestProfileNo);
+            cmd.Parameters.AddWithValue("@run", _currentRunNo);
+
+            var deleted = await cmd.ExecuteNonQueryAsync();
+
+            MessageBox.Show(
+                $"{deleted} Einträge wurden gelöscht.",
+                "Bereinigung",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Fehler beim Prüfen/Löschen:\n{ex.Message}", "DB Error");
+            return false;
+        }
     }
 
 }

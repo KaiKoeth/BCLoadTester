@@ -174,9 +174,11 @@ public class SetupSelectionForm : Form
             _config.database = newConfig.database;
 
             _config.connectionString = newConfig.connectionString;
-            _config.workers = newConfig.workers;
-            _config.companies = newConfig.companies;
+            _config.workers.Clear();
+            _config.workers.AddRange(newConfig.workers);
 
+            _config.companies.Clear();
+            _config.companies.AddRange(newConfig.companies);
             _config.rpmPerWorker = newConfig.rpmPerWorker;
             _config.maxWorkersPerType = newConfig.maxWorkersPerType;
             _config.maxConnectionsPerServer = newConfig.maxConnectionsPerServer;
@@ -188,7 +190,7 @@ public class SetupSelectionForm : Form
                 "Success");
 
             // 🔥 WICHTIG: Änderung markieren
-            _changed = true;
+            _changed = false;
         }
         catch (Exception ex)
         {
@@ -201,10 +203,13 @@ public class SetupSelectionForm : Form
     // =========================
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        base.OnFormClosing(e);
+        // ❌ KEINE eigene Nachfrage mehr!
+        // Sub-Forms kümmern sich bereits darum
 
         this.DialogResult = _changed
             ? DialogResult.OK
             : DialogResult.Cancel;
+
+        base.OnFormClosing(e);
     }
 }

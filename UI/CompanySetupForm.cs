@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 using System.Drawing;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace BCLoadtester.config;
 
@@ -11,6 +13,7 @@ public class CompanySetupForm : Form
     private AppConfig _config;
     private DataGridView grid;
     private bool _isDirty = false;
+    private bool _suppressDirty = false;
 
     public CompanySetupForm(AppConfig config)
     {
@@ -32,9 +35,6 @@ public class CompanySetupForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
 
-        // =========================
-        // 🔹 GRID
-        // =========================
         grid = new DataGridView
         {
             Dock = DockStyle.Fill,
@@ -53,15 +53,12 @@ public class CompanySetupForm : Form
 
         grid.ColumnHeaderMouseClick += Grid_HeaderClick;
         grid.CellDoubleClick += Grid_CellDoubleClick;
+        grid.CellClick += Grid_CellClick;
 
-        // 🔥 Tooltip + Cursor
         grid.CellToolTipTextNeeded += Grid_CellToolTipTextNeeded;
         grid.CellMouseEnter += Grid_CellMouseEnter;
         grid.CellMouseLeave += (s, e) => grid.Cursor = Cursors.Default;
 
-        // =========================
-        // 🔹 BUTTONS
-        // =========================
         var bottomPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -87,11 +84,11 @@ public class CompanySetupForm : Form
         LoadCompanies();
     }
 
-    // =========================
-    // 🔥 DIRTY
-    // =========================
     void MarkDirty()
     {
+        if (_suppressDirty)
+            return;
+
         _isDirty = true;
 
         if (!Text.EndsWith("*"))
@@ -102,7 +99,7 @@ public class CompanySetupForm : Form
     {
         if (!_isDirty)
         {
-            this.DialogResult = DialogResult.Cancel; // 🔥 NEU
+            this.DialogResult = DialogResult.Cancel;
             return;
         }
 
@@ -124,46 +121,41 @@ public class CompanySetupForm : Form
             SaveChanges();
         }
 
-        // 🔥 WICHTIG: DialogResult setzen
         this.DialogResult = DialogResult.OK;
     }
 
-    // =========================
-    // 🔧 COLUMNS
-    // =========================
     void BuildColumns()
     {
         grid.Columns.Clear();
 
-        var enabledCol = new DataGridViewCheckBoxColumn
-        {
-            Name = "enabled",
-            HeaderText = "Enabled"
-        };
-
-        grid.Columns.Add(enabledCol);
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "enabled", HeaderText = "Enabled" });
         grid.Columns.Add("company", "Company");
+        grid.Columns.Add("serviceRoot", "Service Root");
+        grid.Columns.Add("apiRoot", "API Root");
+
+        var apiTestCol = new DataGridViewButtonColumn
+        {
+            Name = "apiTest",
+            HeaderText = "API",
+            Text = "Test",
+            UseColumnTextForButtonValue = true
+        };
+        grid.Columns.Add(apiTestCol);
 
         foreach (var worker in _config.workers)
         {
-            var col = new DataGridViewTextBoxColumn
+            grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = worker.type,
+                HeaderText = $"{(worker.enabled ? "☑" : "☐")} {worker.type}",
                 SortMode = DataGridViewColumnSortMode.NotSortable
-            };
-
-
-            col.HeaderText = $"{(worker.enabled ? "☑" : "☐")} {worker.type}";
-
-            grid.Columns.Add(col);
+            });
         }
 
         grid.Columns["company"].ReadOnly = true;
+        grid.Columns["apiTest"].ReadOnly = true;
     }
 
-    // =========================
-    // 🔧 LOAD
-    // =========================
     void LoadCompanies()
     {
         grid.Rows.Clear();
@@ -173,15 +165,15 @@ public class CompanySetupForm : Form
             var values = new List<object>
             {
                 c.enabled,
-                c.name
+                c.name,
+                c.serviceRoot ?? "",
+                c.apiRoot ?? "",
+                "Test"
             };
 
             foreach (var worker in _config.workers)
             {
-                if (worker.type == "WebOrderCreate" && c.webOrderConfig != null)
-                    values.Add($"{GetRpm(c, worker.type)} ⚙");
-                else
-                    values.Add(GetRpm(c, worker.type));
+                values.Add(GetRpm(c, worker.type));
             }
 
             grid.Rows.Add(values.ToArray());
@@ -190,15 +182,11 @@ public class CompanySetupForm : Form
 
     int GetRpm(Company company, string worker)
     {
-        if (company.rpm != null && company.rpm.ContainsKey(worker))
-            return company.rpm[worker];
-
-        return 0;
+        return company.rpm != null && company.rpm.ContainsKey(worker)
+            ? company.rpm[worker]
+            : 0;
     }
 
-    // =========================
-    // 🔧 SAVE
-    // =========================
     void SaveChanges()
     {
         grid.EndEdit();
@@ -210,14 +198,14 @@ public class CompanySetupForm : Form
             var company = _config.companies[i];
 
             company.enabled = Convert.ToBoolean(row.Cells[0].Value);
+            company.serviceRoot = row.Cells["serviceRoot"].Value?.ToString();
+            company.apiRoot = row.Cells["apiRoot"].Value?.ToString();
 
-            int colIndex = 2;
+            int colIndex = 5;
 
             foreach (var worker in _config.workers)
             {
                 var value = row.Cells[colIndex].Value?.ToString() ?? "0";
-                value = value.Replace("⚙", "").Trim();
-
                 SetRpm(company, worker.type, value);
                 colIndex++;
             }
@@ -240,18 +228,14 @@ public class CompanySetupForm : Form
         company.rpm[worker] = Convert.ToInt32(value ?? 0);
     }
 
-    // =========================
-    // 🔧 HEADER CLICK
-    // =========================
     void Grid_HeaderClick(object sender, DataGridViewCellMouseEventArgs e)
     {
         if (e.RowIndex != -1)
             return;
 
-        int workerStartCol = 2;
-        int workerEndCol = workerStartCol + _config.workers.Count - 1;
+        int workerStartCol = 5;
 
-        if (e.ColumnIndex >= workerStartCol && e.ColumnIndex <= workerEndCol)
+        if (e.ColumnIndex >= workerStartCol)
         {
             int workerIndex = e.ColumnIndex - workerStartCol;
             var worker = _config.workers[workerIndex];
@@ -261,22 +245,16 @@ public class CompanySetupForm : Form
             grid.Columns[e.ColumnIndex].HeaderText =
                 $"{(worker.enabled ? "☑" : "☐")} {worker.type}";
 
-
             MarkDirty();
         }
     }
 
-    // =========================
-    // 🔥 DRILLDOWN
-    // =========================
     void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
     {
         if (e.RowIndex < 0 || e.ColumnIndex < 0)
             return;
 
-        var column = grid.Columns[e.ColumnIndex];
-
-        if (column.Name != "WebOrderCreate")
+        if (grid.Columns[e.ColumnIndex].Name != "WebOrderCreate")
             return;
 
         var company = _config.companies[e.RowIndex];
@@ -290,18 +268,31 @@ public class CompanySetupForm : Form
         MarkDirty();
     }
 
-    // =========================
-    // 🔥 TOOLTIP
-    // =========================
     void Grid_CellToolTipTextNeeded(object sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex < 0 || e.ColumnIndex < 0)
             return;
 
-        if (grid.Columns[e.ColumnIndex].Name != "WebOrderCreate")
+        var column = grid.Columns[e.ColumnIndex].Name;
+        var company = _config.companies[e.RowIndex];
+
+        if (column == "apiTest")
+        {
+            var serviceRoot = string.IsNullOrWhiteSpace(company.serviceRoot)
+                ? _config.serviceRoot
+                : company.serviceRoot;
+
+            var apiRoot = string.IsNullOrWhiteSpace(company.apiRoot)
+                ? _config.apiRoot
+                : company.apiRoot;
+
+            e.ToolTipText = $"{serviceRoot}{apiRoot}";
+            return;
+        }
+
+        if (column != "WebOrderCreate")
             return;
 
-        var company = _config.companies[e.RowIndex];
         var cfg = company.webOrderConfig;
 
         if (cfg == null)
@@ -313,13 +304,9 @@ public class CompanySetupForm : Form
         e.ToolTipText =
             $"⚙ WebOrder Settings\n" +
             $"Lines: {cfg.minLines}-{cfg.maxLines}\n" +
-            $"BigOrder: {cfg.bigOrderLines} / {cfg.bigOrderIntervalMinutes} min\n\n" +
-            $"Double click to edit";
+            $"BigOrder: {cfg.bigOrderLines} / {cfg.bigOrderIntervalMinutes} min";
     }
 
-    // =========================
-    // 🔥 CURSOR
-    // =========================
     void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
     {
         if (e.RowIndex < 0 || e.ColumnIndex < 0)
@@ -329,41 +316,21 @@ public class CompanySetupForm : Form
             grid.Cursor = Cursors.Hand;
     }
 
-    // =========================
-    // 🔧 ADD / DELETE
-    // =========================
     void AddCompany()
     {
-        string name = Prompt("Mandant Name:");
-        if (string.IsNullOrWhiteSpace(name))
-            return;
-
-        string guid = Prompt("GUID:");
-        if (string.IsNullOrWhiteSpace(guid))
-            return;
-
         var company = new Company
         {
-            name = name,
-            guid = guid,
+            name = Prompt("Mandant Name:"),
+            guid = Prompt("GUID:"),
             enabled = false,
             rpm = new Dictionary<string, int>(),
-            webOrderConfig = new WebOrderConfig
-            {
-                minLines = 1,
-                maxLines = 1,
-                bigOrderLines = 0,
-                bigOrderIntervalMinutes = 0
-            }
+            webOrderConfig = new WebOrderConfig()
         };
 
         foreach (var w in _config.workers)
-        {
             company.rpm[w.type] = 0;
-        }
 
         _config.companies.Add(company);
-
         LoadCompanies();
         MarkDirty();
     }
@@ -378,26 +345,12 @@ public class CompanySetupForm : Form
         if (index < 0 || index >= _config.companies.Count)
             return;
 
-        var company = _config.companies[index];
-
-        var result = MessageBox.Show(
-            $"Mandant '{company.name}' wirklich löschen?",
-            "Bestätigen",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Warning);
-
-        if (result != DialogResult.Yes)
-            return;
-
         _config.companies.RemoveAt(index);
 
         LoadCompanies();
         MarkDirty();
     }
 
-    // =========================
-    // 🔧 PROMPT
-    // =========================
     string Prompt(string text)
     {
         var form = new Form
@@ -409,19 +362,131 @@ public class CompanySetupForm : Form
         };
 
         var input = new TextBox { Dock = DockStyle.Top };
-
-        var ok = new Button
-        {
-            Text = "OK",
-            Dock = DockStyle.Bottom,
-            DialogResult = DialogResult.OK
-        };
+        var ok = new Button { Text = "OK", Dock = DockStyle.Bottom, DialogResult = DialogResult.OK };
 
         form.Controls.Add(input);
         form.Controls.Add(ok);
-
         form.AcceptButton = ok;
 
         return form.ShowDialog() == DialogResult.OK ? input.Text : "";
+    }
+
+
+    private async Task TestApiForCompany(Company company, int rowIndex)
+    {
+        var cell = grid.Rows[rowIndex].Cells["apiTest"];
+
+        try
+        {
+            _suppressDirty = true; // 🔥 verhindert Dirty-Flag
+
+            cell.Value = "...";
+            cell.Style.BackColor = Color.LightGray;
+
+            var row = grid.Rows[rowIndex];
+
+            var serviceRootInput = row.Cells["serviceRoot"].Value?.ToString();
+            var apiRootInput = row.Cells["apiRoot"].Value?.ToString();
+
+            var hasCompanyService = !string.IsNullOrWhiteSpace(serviceRootInput);
+            var hasCompanyApi = !string.IsNullOrWhiteSpace(apiRootInput);
+
+            // ❌ Halb gepflegt → Fehler
+            if ((hasCompanyService && !hasCompanyApi) || (!hasCompanyService && hasCompanyApi))
+            {
+                cell.Value = "CONFIG!";
+                cell.Style.BackColor = Color.Orange;
+
+                MessageBox.Show(
+                    $"API Setup unvollständig bei {company.name}\n\nBitte entweder beide Felder pflegen oder leer lassen.",
+                    "Konfigurationsfehler",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+
+                return;
+            }
+
+            // ⚠️ Keine Company API → Hinweis (kein Test!)
+            if (!hasCompanyService && !hasCompanyApi)
+            {
+                cell.Value = "GLOBAL";
+                cell.Style.BackColor = Color.LightBlue;
+
+                MessageBox.Show(
+                    $"Für {company.name} ist keine eigene API konfiguriert.\n\nBitte globale API Konfiguration testen.",
+                    "Hinweis",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                return;
+            }
+
+            // ✅ Company API testen
+            var url = serviceRootInput!.TrimEnd('/') + apiRootInput!;
+
+            using var client = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(5)
+            };
+
+            var auth = Convert.ToBase64String(
+                System.Text.Encoding.ASCII.GetBytes($"{_config.username}:{_config.password}")
+            );
+
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", auth);
+
+            var response = await client.GetAsync(url);
+
+            if (response.IsSuccessStatusCode)
+            {
+                cell.Value = "OK";
+                cell.Style.BackColor = Color.LightGreen;
+
+                MessageBox.Show(
+                    $"API OK\n\nCompany: {company.name}\nURL: {url}",
+                    "API Test erfolgreich",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                cell.Value = $"ERR {(int)response.StatusCode}";
+                cell.Style.BackColor = Color.IndianRed;
+
+                MessageBox.Show(
+                    $"API Fehler {(int)response.StatusCode}\n\nCompany: {company.name}\nURL: {url}",
+                    "API Fehler",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            cell.Value = "FAIL";
+            cell.Style.BackColor = Color.DarkRed;
+
+            MessageBox.Show(
+                $"API Test fehlgeschlagen\n\nCompany: {company.name}\n\n{ex.Message}",
+                "API Fehler",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _suppressDirty = false; // 🔥 immer zurücksetzen
+        }
+    }
+    private async void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            return;
+
+        if (grid.Columns[e.ColumnIndex].Name != "apiTest")
+            return;
+
+        var company = _config.companies[e.RowIndex];
+
+        await TestApiForCompany(company, e.RowIndex);
     }
 }

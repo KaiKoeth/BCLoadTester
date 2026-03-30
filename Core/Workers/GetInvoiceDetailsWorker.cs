@@ -11,6 +11,7 @@ public class GetInvoiceDetailsWorker : BaseWorker
         HttpClient client,
         List<string> customers,
         string serviceRoot,
+        string apiRoot,
         string companyId,
         string companyName,
         int rpm,
