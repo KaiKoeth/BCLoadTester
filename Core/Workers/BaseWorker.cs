@@ -10,15 +10,21 @@ public abstract class BaseWorker : IWorker
     protected readonly string _workerName;
     protected readonly string _company;
 
-    private readonly int _delayMs;
     private readonly int _rpm;
+    private readonly double _intervalMs;
+    private readonly SemaphoreSlim _semaphore;
+    private readonly Func<int> _getConcurrency;
+    private const int MaxSemaphore = 500; // 🔥 globales Limit
+    private int _currentTarget = 1;
 
     protected BaseWorker(
         HttpClient client,
         Statistics stats,
         string workerName,
         string company,
-        int rpm)
+        int rpm,
+        Func<int> getConcurrency
+    )
     {
         _client = client;
         _stats = stats;
@@ -26,49 +32,51 @@ public abstract class BaseWorker : IWorker
         _company = company;
 
         _rpm = Math.Max(1, rpm);
-        _delayMs = Math.Max(1, 60000 / _rpm);
+        _intervalMs = 60000.0 / _rpm;
+
+        // 🔥 Safety (wichtig!)
+        _getConcurrency = getConcurrency;
+
+        // 🔥 Semaphore groß machen → wir steuern selbst
+        _semaphore = new SemaphoreSlim(MaxSemaphore);
     }
 
     public async Task Run(CancellationToken token)
     {
-        while (!token.IsCancellationRequested)
+        try
         {
-            var sw = Stopwatch.StartNew();
-
-            try
+            while (!token.IsCancellationRequested)
             {
-                var response = await ExecuteAsync(token);
+                var loopStart = DateTime.UtcNow;
 
-                // ✅ Request zählen
-                _stats.RequestSent(_workerName, _company, _rpm);
+                int desired = Math.Min(MaxSemaphore, Math.Max(1, _getConcurrency()));
 
-                // 🔥 HTTP Fehler erkennen (DEIN FIX)
-                if (response != null && !response.IsSuccessStatusCode)
+                // 🔥 sanft annähern
+                if (_currentTarget < desired)
+                    _currentTarget++;
+                else if (_currentTarget > desired)
+                    _currentTarget--;
+
+                int target = _currentTarget;
+
+                int inFlight = MaxSemaphore - _semaphore.CurrentCount;
+
+                if (inFlight < target)
                 {
-                    var msg = $"{(int)response.StatusCode} {response.ReasonPhrase}";
-                    _stats.Error(_workerName, _company, msg);
+                    await _semaphore.WaitAsync(token);
+                    _ = ExecuteInternalAsync(token);
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _stats.Error(_workerName, _company, ex.Message);
-            }
+                else
+                {
+                    await Task.Delay(1, token); // 🔥 wichtig
+                }
 
-            sw.Stop();
+                var elapsed = (DateTime.UtcNow - loopStart).TotalMilliseconds;
+                var delay = Math.Max(0, _intervalMs - elapsed);
 
-            _stats.AddResponseTime(_workerName, _company, sw.ElapsedMilliseconds);
-
-            var delay = _delayMs - (int)sw.ElapsedMilliseconds;
-
-            if (delay > 0)
-            {
                 try
                 {
-                    await Task.Delay(delay, token);
+                    await Task.Delay((int)delay, token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -76,8 +84,50 @@ public abstract class BaseWorker : IWorker
                 }
             }
         }
+        catch (OperationCanceledException)
+        {
+            // sauberer Exit
+        }
     }
 
-    // 🔥 WICHTIG: MUSS implementiert werden!
+    private async Task ExecuteInternalAsync(CancellationToken token)
+    {
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            var response = await ExecuteAsync(token);
+
+            _stats.RequestSent(_workerName, _company, 1);
+
+            if (response != null && !response.IsSuccessStatusCode)
+            {
+                var msg = $"{(int)response.StatusCode} {response.ReasonPhrase}";
+                _stats.Error(_workerName, _company, msg);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // normal beim Stop
+        }
+        catch (Exception ex)
+        {
+            _stats.Error(_workerName, _company, ex.Message);
+        }
+        finally
+        {
+            sw.Stop();
+
+            _stats.AddResponseTime(
+                _workerName,
+                _company,
+                sw.ElapsedMilliseconds
+            );
+
+            _semaphore.Release();
+        }
+    }
+
+    // 🔥 MUSS implementiert werden!
     protected abstract Task<HttpResponseMessage> ExecuteAsync(CancellationToken token);
 }

@@ -18,8 +18,8 @@ public class WebOrderCreateWorker : BaseWorker
     private readonly string _promotionMediumTrgGrpNo;
     private readonly decimal _shippingChargeAmount;
 
-    private DateTime _lastBigOrder = DateTime.MinValue;
-    private readonly object _bigOrderLock = new();
+    // 🔥 Lock-freie Steuerung
+    private long _lastBigOrderTicks;
 
     private static int _counter = 0;
 
@@ -35,13 +35,14 @@ public class WebOrderCreateWorker : BaseWorker
         int rpm,
         Statistics stats,
         string workerName,
+         Func<int> getConcurrency,
         int bigOrderLines = 0,
         int bigOrderIntervalMinutes = 0,
         string? promotionMediumNo = null,
         string? promotionMediumTrgGrpNo = null,
         decimal shippingChargeAmount = 0
     )
-    : base(client, stats, workerName, companyName, Math.Max(1, rpm))
+    : base(client, stats, workerName, companyName, Math.Max(1, rpm), getConcurrency)
     {
         _orderStatusPool = orderStatusPool;
         _payloadPool = payloadPool;
@@ -56,37 +57,39 @@ public class WebOrderCreateWorker : BaseWorker
         _promotionMediumTrgGrpNo = promotionMediumTrgGrpNo ?? "";
         _shippingChargeAmount = shippingChargeAmount;
 
+        var now = DateTime.UtcNow;
+
         if (_bigOrderIntervalMinutes > 0)
         {
             var offsetSeconds = Random.Shared.Next(0, _bigOrderIntervalMinutes * 60);
-
-            // 🔥 Startzeit zufällig in die Vergangenheit verschieben
-            _lastBigOrder = DateTime.UtcNow - TimeSpan.FromSeconds(offsetSeconds);
+            var start = now - TimeSpan.FromSeconds(offsetSeconds);
+            _lastBigOrderTicks = start.Ticks;
         }
         else
         {
-            _lastBigOrder = DateTime.UtcNow;
+            _lastBigOrderTicks = now.Ticks;
         }
     }
 
     protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
-        string json;
         var now = DateTime.UtcNow;
+        string json;
 
         // =========================
-        // 🔥 BIG ORDER LOGIC (FINAL)
+        // 🔥 BIG ORDER (LOCK-FREE)
         // =========================
         bool createBigOrder = false;
 
         if (_bigOrderLines > 0 && _bigOrderIntervalMinutes > 0)
         {
-            lock (_bigOrderLock)
+            var last = new DateTime(Interlocked.Read(ref _lastBigOrderTicks));
+
+            if ((now - last).TotalMinutes >= _bigOrderIntervalMinutes)
             {
-                if ((now - _lastBigOrder).TotalMinutes >= _bigOrderIntervalMinutes)
+                if (Interlocked.Exchange(ref _lastBigOrderTicks, now.Ticks) != last.Ticks)
                 {
                     createBigOrder = true;
-                    _lastBigOrder = now;
                 }
             }
         }
@@ -94,8 +97,6 @@ public class WebOrderCreateWorker : BaseWorker
         if (createBigOrder)
         {
             json = _payloadPool.CreateBigOrder(_bigOrderLines);
-
-            // 🔥 Tracking
             _stats.IncrementCustomMetric(_workerName, _company, "BigOrders");
         }
         else
@@ -107,7 +108,7 @@ public class WebOrderCreateWorker : BaseWorker
             }
         }
 
-        // 🔁 Auto-Refill
+        // 🔁 Refill
         _payloadPool.RefillIfLow();
 
         // 📊 Pool Size
@@ -149,22 +150,16 @@ public class WebOrderCreateWorker : BaseWorker
         payload["externalReferenceNo"] = id;
         payload["externalDocumentNo"] = id;
         payload["basketId"] = id;
-
-        // 🔥 FIX: ISO 8601 (BC sauber)
         payload["orderDateTime"] = now.ToString("o");
 
         // =========================
-        // 🔥 PROMOTION (NEU)
+        // 🔥 PROMOTION
         // =========================
         if (!string.IsNullOrEmpty(_promotionMediumNo))
-        {
             payload["promotionMediumNo"] = _promotionMediumNo;
-        }
 
         if (!string.IsNullOrEmpty(_promotionMediumTrgGrpNo))
-        {
             payload["promotionMediumTrgGrpNo"] = _promotionMediumTrgGrpNo;
-        }
 
         var newJson = JsonSerializer.Serialize(payload);
 
@@ -177,17 +172,22 @@ public class WebOrderCreateWorker : BaseWorker
 
         await response.Content.LoadIntoBufferAsync();
 
+        // =========================
+        // 🔥 RETRY + JITTER
+        // =========================
         if (!response.IsSuccessStatusCode)
         {
-            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
+            int status = (int)response.StatusCode;
+
+            if (status == 429 || status >= 500)
             {
-                await Task.Delay(200, token);
+                await Task.Delay(200 + Random.Shared.Next(0, 200), token);
             }
         }
         else
         {
             // =========================
-            // 🔥 IN ORDER STATUS POOL ADDEN
+            // 🔥 ORDERSTATUS POOL
             // =========================
             try
             {
@@ -208,7 +208,7 @@ public class WebOrderCreateWorker : BaseWorker
             }
             catch
             {
-                // bewusst ignorieren → darf Loadtest nicht stören
+                // bewusst ignorieren
             }
         }
 

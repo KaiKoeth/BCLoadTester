@@ -38,6 +38,7 @@ public partial class LoadTestDashboard : Form
     ProgressBar progressLoading;
     private const int PoolWarningThreshold = 500;
     private const int PoolCriticalThreshold = 250;
+    private Dictionary<(string Company, string Worker), int> _dynamicConcurrency = new();
     private NumericUpDown numTestDuration;
     private NumericUpDown numRemainingMinutes;
     private DateTime? _endTime;
@@ -69,7 +70,6 @@ public partial class LoadTestDashboard : Form
     public LoadTestDashboard()
     {
         InitializeComponent();
-        InitializeApp();
 
         _process = Process.GetCurrentProcess();
 
@@ -212,7 +212,7 @@ public partial class LoadTestDashboard : Form
                 return;
             }
 
-            var dlg = new SetupSelectionForm(_config);
+            var dlg = new SetupSelectionForm(_config, _dynamicConcurrency);
 
             if (dlg.ShowDialog(this) == DialogResult.OK)
             {
@@ -444,7 +444,7 @@ public partial class LoadTestDashboard : Form
             RowHeadersVisible = false
         };
 
-        statsGrid.ColumnCount = 9;
+        statsGrid.ColumnCount = 10;
         statsGrid.Columns[0].Name = "Company";
         statsGrid.Columns[1].Name = "Worker";
         statsGrid.Columns[2].Name = "RPM";
@@ -452,8 +452,9 @@ public partial class LoadTestDashboard : Form
         statsGrid.Columns[4].Name = "Errors";
         statsGrid.Columns[5].Name = "Target RPS";
         statsGrid.Columns[6].Name = "Actual RPS";
-        statsGrid.Columns[7].Name = "Avg ms";
-        statsGrid.Columns[8].Name = "Max ms";
+        statsGrid.Columns[7].Name = "Avg ms (current)";
+        statsGrid.Columns[8].Name = "Avg ms (history)";
+        statsGrid.Columns[9].Name = "Max ms";
 
         statsGrid.CellClick += statsGrid_CellClick;
 
@@ -524,7 +525,10 @@ public partial class LoadTestDashboard : Form
             RefreshGrid(runtime);
 
             UpdatePoolWarnings();
+
+            AdjustConcurrency();
         };
+        InitializeApp();
         timer.Start();
     }
 
@@ -660,6 +664,13 @@ public partial class LoadTestDashboard : Form
                 string workerDisplayName = $"{worker.type} (x{parallelWorkers})";
                 for (int i = 0; i < parallelWorkers; i++)
                 {
+                    Func<int> concurrencyFunc = () =>
+                    {
+                        if (_dynamicConcurrency.TryGetValue((company.name, worker.type), out var val))
+                            return val;
+
+                        return ResolveConcurrency(worker); // fallback
+                    };
                     switch (worker.type)
                     {
                         case "EmailSearch":
@@ -673,7 +684,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerKey));
+                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -681,14 +692,13 @@ public partial class LoadTestDashboard : Form
                             {
                                 if (!_customerPools.TryGetValue((company.name, worker.type), out var pmcCustomers) || pmcCustomers.Count == 0)
                                     break;
-
                                 workers.Add(new PhoneticSearchWorker(
                                     _client, pmcCustomers,
                                     serviceRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerKey));
+                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -698,12 +708,12 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new CustomerCreateWorker(
-                                    _client, createCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client, createCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -713,12 +723,12 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new ShipToAddressCreateWorker(
-                                    _client, shipToCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client, shipToCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -728,34 +738,35 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new CustomerHistoryWorker(
-                                    _client,
-                                    historyCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    historyCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
                         case "WebOrderCreate":
                             {
                                 workers.Add(new WebOrderCreateWorker(
-                                    _client,
-                                    orderStatusPool,
-                                    webOrderPool,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats,
-                                    workerKey,
-                                    company.webOrderConfig?.bigOrderLines ?? 0,
-                                    company.webOrderConfig?.bigOrderIntervalMinutes ?? 0,
-                                    company.webOrderConfig?.promotionMediumNo,
-                                    company.webOrderConfig?.promotionMediumTrgGrpNo,
-                                    company.webOrderConfig?.shippingChargeAmount ?? 0
-                                ));
+                                                                    _client,
+                                                                    orderStatusPool,
+                                                                    webOrderPool,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats,
+                                                                    workerKey,
+                                                                    concurrencyFunc,
+                                                                    company.webOrderConfig?.bigOrderLines ?? 0,
+                                                                    company.webOrderConfig?.bigOrderIntervalMinutes ?? 0,
+                                                                    company.webOrderConfig?.promotionMediumNo,
+                                                                    company.webOrderConfig?.promotionMediumTrgGrpNo,
+                                                                    company.webOrderConfig?.shippingChargeAmount ?? 0
+                                                                ));
                                 break;
                             }
 
@@ -765,12 +776,12 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new GetInvoiceDetailsWorker(
-                                    _client,
-                                    invoiceCustomers,
-                                    serviceRoot, apiRoot,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    invoiceCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -780,26 +791,28 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new GetCreMemoDetailsWorker(
-                                    _client,
-                                    creditMemoCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    creditMemoCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
                         case "OrderStatus":
                             {
+                                if (orderStatusPool.Count == 0)
+                                    break;
                                 workers.Add(new OrderStatusWorker(
-                                    _client,
-                                    orderStatusPool,
-                                     serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    orderStatusPool,
+                                                                     serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
                     }
@@ -807,6 +820,18 @@ public partial class LoadTestDashboard : Form
 
             }
 
+        }
+
+        // 🔥 INITIAL CONCURRENCY setzen (WICHTIG!)
+        _dynamicConcurrency.Clear();
+
+        foreach (var company in _config.companies.Where(c => c.enabled))
+        {
+            foreach (var worker in _config.workers.Where(w => w.enabled))
+            {
+                _dynamicConcurrency[(company.name, worker.type)] =
+                    ResolveConcurrency(worker); // Startwert
+            }
         }
 
         _controller = new LoadController();
@@ -883,11 +908,20 @@ public partial class LoadTestDashboard : Form
         try
         {
             _config = ConfigLoader.Load();
-            _client = new HttpClient(new SocketsHttpHandler
-            {
-                MaxConnectionsPerServer = _config.maxConnectionsPerServer
-            });
 
+            bool loaded;
+
+            _config.avgResponseTimesMs =
+                LoadtestStatsLoader.LoadAvgResponseTimes(_config, out loaded);
+
+            // 🔥 Safety
+            _config.avgResponseTimesMs ??= new Dictionary<string, double>();
+
+            if (loaded && _config.avgResponseTimesMs.Count > 0)
+            {
+                lblStatus.Text = "Historische Durchschnittswerte geladen";
+                lblStatus.ForeColor = Color.DarkGreen;
+            }
         }
         catch (Exception ex)
         {
@@ -1141,6 +1175,8 @@ public partial class LoadTestDashboard : Form
 
 
             // 🔹 Gruppenzeile
+            double histAvg = CalculateCompanyHistoryAvg(companyName, companyGroup);
+
             _allRows.Add(new DashboardRow
             {
                 Company = companyName,
@@ -1151,8 +1187,16 @@ public partial class LoadTestDashboard : Form
 
                 Requests = companyGroup.Sum(x => x.Requests),
                 Errors = companyGroup.Sum(x => x.Errors),
+
+
+                // 👉 optional: Live behalten
                 AvgMs = companyGroup.Average(x => x.AvgMs),
-                MaxMs = companyGroup.Max(x => x.MaxMs)
+
+                // 👉 NEU: History in MaxMs NICHT, sondern extra (kommt gleich)
+                MaxMs = companyGroup.Max(x => x.MaxMs),
+
+                // 👉 NEU (wenn du Feld ergänzt hast)
+                HistoryAvgMs = histAvg
             });
 
             // 🔹 Worker-Zeilen
@@ -1197,7 +1241,8 @@ public partial class LoadTestDashboard : Form
                     Requests = w.Requests,
                     Errors = w.Errors,
                     AvgMs = w.AvgMs,
-                    MaxMs = w.MaxMs
+                    MaxMs = w.MaxMs,
+                    HistoryAvgMs = GetHistoricalAvgMs(companyName, w.Worker)
                 });
             }
         }
@@ -1250,6 +1295,11 @@ public partial class LoadTestDashboard : Form
                 ? ""
                 : "    " + (row.DisplayWorker ?? row.Worker);
 
+            // 🔥 NEU: historische Responsezeit holen
+            double histMs = row.IsGroup
+     ? row.HistoryAvgMs   // 🔥 DAS IST DER FIX
+     : GetHistoricalAvgMs(row.Company, row.Worker);
+
             int rowIndex = statsGrid.Rows.Add(
                 companyDisplay,
                 workerDisplay,
@@ -1259,6 +1309,7 @@ public partial class LoadTestDashboard : Form
                 targetRps.ToString("0.00"),
                 actualRps.ToString("0.00"),
                 row.AvgMs.ToString("0"),
+                histMs.ToString("0"),
                 row.MaxMs.ToString("0")
             );
 
@@ -1912,6 +1963,23 @@ public partial class LoadTestDashboard : Form
             bool isExpanded = false;
 
             // 🔹 Gruppenzeile
+            double histAvg = CalculateCompanyHistoryAvg(
+               company.name,
+               _config.workers
+                   .Where(w => w.enabled)
+                   .Select(w => (
+                       Worker: w.type,
+                       Company: company.name,
+                       Rpm: (long)(company.rpm.GetValueOrDefault(w.type, 0)),
+                       Requests: 0L,
+                       Errors: 0L,
+                       Rps: 0.0,
+                       PoolSize: 0,
+                       AvgMs: 0.0,
+                       MaxMs: 0L
+                   ))
+           );
+
             _allRows.Add(new DashboardRow
             {
                 Company = company.name,
@@ -1921,10 +1989,14 @@ public partial class LoadTestDashboard : Form
                 RPM = company.rpm
                     .Where(r => _config.workers.Any(w => w.enabled && w.type == r.Key))
                     .Sum(r => r.Value),
+
                 Requests = 0,
                 Errors = 0,
                 AvgMs = 0,
-                MaxMs = 0
+                MaxMs = 0,
+
+                // 🔥 DAS FEHLTE!
+                HistoryAvgMs = histAvg
             });
 
             // 🔹 Worker-Zeilen
@@ -1957,7 +2029,8 @@ public partial class LoadTestDashboard : Form
                     Requests = 0,
                     Errors = 0,
                     AvgMs = 0,
-                    MaxMs = 0
+                    MaxMs = 0,
+                    HistoryAvgMs = GetHistoricalAvgMs(company.name, worker.type)
                 });
             }
         }
@@ -2381,5 +2454,128 @@ public partial class LoadTestDashboard : Form
             return false;
         }
     }
+
+    private int ResolveConcurrency(WorkerConfig worker)
+    {
+        // 🔥 1. Worker Override
+        if (worker.maxConcurrency.HasValue && worker.maxConcurrency.Value > 0)
+            return worker.maxConcurrency.Value;
+
+        // 🔥 2. Global Default
+        if (_config.maxConcurrencyPerWorker > 0)
+            return _config.maxConcurrencyPerWorker;
+
+        // 🔥 3. Hard fallback (failsafe)
+        return 20;
+    }
+
+    private double GetHistoricalAvgMs(string company, string worker)
+    {
+        if (_config?.avgResponseTimesMs == null)
+            return 100; // fallback
+
+        var key = $"{company}|{worker}";
+
+        if (_config.avgResponseTimesMs.TryGetValue(key, out var val))
+            return Math.Round(val, 0);
+
+        return 100; // fallback
+    }
+
+    private double CalculateCompanyHistoryAvg(
+   string company,
+   IEnumerable<(string Worker, string Company, long Rpm, long Requests, long Errors, double Rps, int PoolSize, double AvgMs, long MaxMs)> workers)
+    {
+        if (_config?.avgResponseTimesMs == null)
+            return 100;
+
+        var values = new List<double>();
+
+        foreach (var w in workers)
+        {
+            var key = $"{company}|{w.Worker}";
+
+            if (_config.avgResponseTimesMs.TryGetValue(key, out var val))
+            {
+                values.Add(val);
+            }
+        }
+
+        if (values.Count == 0)
+            return 100;
+
+        double totalWeight = 0;
+        double weighted = 0;
+
+        foreach (var w in workers)
+        {
+            var key = $"{company}|{w.Worker}";
+
+            if (_config.avgResponseTimesMs.TryGetValue(key, out var val))
+            {
+                weighted += val * w.Rpm;
+                totalWeight += w.Rpm;
+            }
+        }
+
+        return totalWeight > 0 ? weighted / totalWeight : 100;
+    }
+
+    private void AdjustConcurrency()
+    {
+        if (_config == null || _cachedStats.Count == 0)
+            return;
+
+        foreach (var stat in _cachedStats)
+        {
+            if (stat.Rpm <= 0)
+                continue;
+
+            int newConcurrency = CalculateDynamicConcurrency(
+                stat.Company,
+                stat.Worker,
+                stat.Rpm,
+                stat.AvgMs
+            );
+
+            var key = (stat.Company, stat.Worker);
+
+            // 🔥 SMOOTHING (wichtig!)
+            if (_dynamicConcurrency.TryGetValue(key, out var current))
+            {
+                newConcurrency = (int)(current * 0.7 + newConcurrency * 0.3);
+            }
+
+            _dynamicConcurrency[key] = Math.Max(1, newConcurrency);
+        }
+    }
+
+    private int CalculateDynamicConcurrency(
+        string company,
+        string worker,
+        int rpm,
+        double avgMs
+    )
+    {
+        if (rpm <= 0)
+            return 1;
+
+        double rps = rpm / 60.0;
+        double responseTimeSec = avgMs / 1000.0;
+
+        // 🔥 Little’s Law
+        double required = rps * responseTimeSec;
+
+        // 🔥 Sicherheits-Puffer (SEHR wichtig!)
+        required *= 1.2;
+
+        int target = (int)Math.Ceiling(required);
+
+        // 🔥 Limits
+        target = Math.Clamp(target, 1, _config.maxConcurrencyPerWorker * 2);
+
+        return target;
+    }
+
 
 }

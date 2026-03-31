@@ -10,6 +10,9 @@ public class AppConfig
     public int maxWorkersPerType { get; set; } = 50;
     public int maxConnectionsPerServer { get; set; } = 1000;
 
+    public int maxConcurrencyPerWorker { get; set; } = 20;
+    public Dictionary<string, double> avgResponseTimesMs { get; set; } = new();
+
     public string sqlServer { get; set; }
     public int sqlPort { get; set; }
     public string database { get; set; }

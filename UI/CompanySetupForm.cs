@@ -14,8 +14,11 @@ public class CompanySetupForm : Form
     private DataGridView grid;
     private bool _isDirty = false;
     private bool _suppressDirty = false;
+    private readonly Dictionary<(string Company, string Worker), int> _dynamicConcurrency;
 
-    public CompanySetupForm(AppConfig config)
+    public CompanySetupForm(
+    AppConfig config,
+    Dictionary<(string Company, string Worker), int> dynamicConcurrency)
     {
         _config = config;
 
@@ -40,7 +43,8 @@ public class CompanySetupForm : Form
             Dock = DockStyle.Fill,
             AllowUserToAddRows = false,
             RowHeadersVisible = false,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            ShowCellToolTips = true // 🔥 DAS FEHLT!
         };
         grid.CellValueChanged += (s, e) => MarkDirty();
 
@@ -53,9 +57,17 @@ public class CompanySetupForm : Form
         grid.ColumnHeaderMouseClick += Grid_HeaderClick;
         grid.CellClick += Grid_CellClick;
 
-        grid.CellToolTipTextNeeded += Grid_CellToolTipTextNeeded;
         grid.CellMouseEnter += Grid_CellMouseEnter;
-        grid.CellMouseLeave += (s, e) => grid.Cursor = Cursors.Default;
+
+        grid.CellMouseLeave += (s, e) =>
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex >= 0)
+            {
+                grid.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText = null;
+            }
+
+            grid.Cursor = Cursors.Default;
+        };
 
         var bottomPanel = new FlowLayoutPanel
         {
@@ -331,6 +343,17 @@ public class CompanySetupForm : Form
 
             return;
         }
+
+        // 🔥 Worker Tooltip (NEU)
+        var worker = _config.workers.FirstOrDefault(w => w.type == column);
+
+        if (worker != null)
+        {
+            int rpm = GetRpm(company, worker.type);
+
+            e.ToolTipText = BuildWorkerTooltip(company, worker.type, rpm);
+            return;
+        }
     }
 
     void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
@@ -338,8 +361,60 @@ public class CompanySetupForm : Form
         if (e.RowIndex < 0 || e.ColumnIndex < 0)
             return;
 
-        if (grid.Columns[e.ColumnIndex].Name == "webOrderConfig")
+        var column = grid.Columns[e.ColumnIndex].Name;
+        var company = _config.companies[e.RowIndex];
+
+        // 👉 Cursor
+        if (column == "webOrderConfig")
             grid.Cursor = Cursors.Hand;
+        else if (_config.workers.Any(w => w.type == column))
+            grid.Cursor = Cursors.Hand;
+        else
+            grid.Cursor = Cursors.Default;
+
+        // =========================
+        // 🔥 TOOLTIP SETZEN
+        // =========================
+
+        string tooltip = null;
+
+        if (column == "apiTest")
+        {
+            var serviceRoot = string.IsNullOrWhiteSpace(company.serviceRoot)
+                ? _config.serviceRoot
+                : company.serviceRoot;
+
+            var apiRoot = string.IsNullOrWhiteSpace(company.apiRoot)
+                ? _config.apiRoot
+                : company.apiRoot;
+
+            tooltip = $"{serviceRoot}{apiRoot}";
+        }
+        else if (column == "webOrderConfig")
+        {
+            var cfg = company.webOrderConfig;
+
+            tooltip = cfg == null
+                ? "WebOrder konfigurieren"
+                : $"⚙ WebOrder Settings\n" +
+                  $"Lines: {cfg.minLines}-{cfg.maxLines}\n" +
+                  $"BigOrder: {cfg.bigOrderLines} / {cfg.bigOrderIntervalMinutes} min";
+        }
+        else
+        {
+            var worker = _config.workers.FirstOrDefault(w => w.type == column);
+
+            if (worker != null)
+            {
+                int rpm = GetRpm(company, worker.type);
+                tooltip = BuildWorkerTooltip(company, worker.type, rpm);
+            }
+        }
+
+        if (tooltip != null)
+        {
+            grid.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText = tooltip;
+        }
     }
 
     void AddCompany()
@@ -539,6 +614,82 @@ public class CompanySetupForm : Form
         {
             MarkDirty(); // 🔥 nur wenn wirklich geändert
         }
+    }
+
+    private string BuildWorkerTooltip(Company company, string workerType, int rpm)
+    {
+        if (rpm <= 0)
+            return $"{workerType}\n\nKein Load konfiguriert";
+
+        double rps = rpm / 60.0;
+
+        // 🔥 Durchschnittliche Responsezeit (Fallback 1.5s)
+        var key = $"{company.name}|{workerType}";
+
+        // 🔥 DEFAULT = 100 ms
+        double avgMs = 100;
+
+        if (_config.avgResponseTimesMs != null &&
+            _config.avgResponseTimesMs.TryGetValue(key, out var val))
+        {
+            avgMs = val;
+        }
+
+        double avgResponseTimeSec = avgMs / 1000.0;
+
+        // 👉 benötigte Concurrency (Little’s Law)
+        double requiredConcurrency = rps * avgResponseTimeSec;
+
+        // 🔥 Worker-Verteilung
+        int rpmPerWorker = Math.Max(1, _config.rpmPerWorker);
+        int workerCount = Math.Clamp(
+            rpm / rpmPerWorker,
+            1,
+            _config.maxWorkersPerType);
+
+        int workerRpm = Math.Max(1, rpm / workerCount);
+
+        double workerRps = workerRpm / 60.0;
+        double requiredPerWorker = workerRps * avgResponseTimeSec;
+
+        int configuredConcurrency = _config.maxConcurrencyPerWorker;
+
+        int dynamicConcurrency = configuredConcurrency;
+
+        if (_dynamicConcurrency != null &&
+            _dynamicConcurrency.TryGetValue((company.name, workerType), out var dyn))
+        {
+            dynamicConcurrency = dyn;
+        }
+        // 🔥 Bewertung
+        string status;
+        if (configuredConcurrency < requiredPerWorker)
+            status = "❌ Bottleneck (zu wenig Concurrency)";
+        else if (configuredConcurrency < requiredPerWorker * 1.5)
+            status = "⚠ Grenzwertig";
+        else
+            status = "✅ OK";
+
+        return
+            $"📊 {workerType} ({company.name})\n\n" +
+
+            $"Ziel:\n" +
+            $"• {rpm} RPM ({rps:F2} req/s)\n\n" +
+
+            $"System:\n" +
+            $"• Ø Response: {avgResponseTimeSec:0.000}s ({avgMs:0} ms)\n" +
+            $"• benötigte Parallelität: {requiredConcurrency:0.0}\n\n" +
+
+            $"Worker Setup:\n" +
+            $"• Worker: {workerCount}\n" +
+            $"• RPM/Worker: {workerRpm}\n" +
+            $"• benötigte Concurrency/Worker: {requiredPerWorker:0.0}\n\n" +
+
+            $"Config:\n" +
+            $"• Max Concurrency (static): {configuredConcurrency}\n" +
+            $"• Auto Concurrency (dynamic): {dynamicConcurrency}\n\n" +
+
+            $"Ergebnis:\n{status}";
     }
 
 }

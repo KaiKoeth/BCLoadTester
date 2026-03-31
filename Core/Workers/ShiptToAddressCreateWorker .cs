@@ -8,8 +8,8 @@ public class ShipToAddressCreateWorker : BaseWorker
     private readonly List<CustomerEntry> _customers;
     private readonly string _endpointBase;
 
-    private readonly Random _rnd = new Random();
-    private readonly object _rndLock = new object(); // bleibt!
+    // 🔥 thread-safe Random (ersetzt Lock!)
+    private readonly ThreadLocal<Random> _rnd = new(() => new Random());
 
     public ShipToAddressCreateWorker(
         HttpClient client,
@@ -21,8 +21,8 @@ public class ShipToAddressCreateWorker : BaseWorker
         string companyName,
         int rpm,
         Statistics stats,
-        string workerName)
-        : base(client, stats, workerName, companyName, Math.Max(1, rpm))
+         string workerName, Func<int> getConcurrency)
+        : base(client, stats, workerName, companyName, Math.Max(1, rpm), getConcurrency)
     {
         _customers = customers ?? new List<CustomerEntry>();
 
@@ -32,27 +32,34 @@ public class ShipToAddressCreateWorker : BaseWorker
 
     protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)
     {
+        // =========================
+        // 🔹 Fallback
+        // =========================
         if (_customers.Count == 0)
         {
             await Task.Delay(1000, token);
             return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
 
-        CustomerEntry customer;
-        CustomerEntry CustAddress;
+        // =========================
+        // 🔹 Random Auswahl (ohne Lock!)
+        // =========================
+        var rnd = _rnd.Value!;
 
-        // 🔥 THREAD SAFE RANDOM bleibt
-        lock (_rndLock)
-        {
-            customer = _customers[_rnd.Next(_customers.Count)];
-            CustAddress = _customers[_rnd.Next(_customers.Count)];
-        }
+        var customer = _customers[rnd.Next(_customers.Count)];
+        var custAddress = _customers[rnd.Next(_customers.Count)];
 
+        // =========================
+        // 🔹 URL bauen
+        // =========================
         var url = _endpointBase.Replace(
             "{customer}",
             customer.SystemId.ToString()
         );
 
+        // =========================
+        // 🔹 Payload
+        // =========================
         var payload = new
         {
             phoneNumber = "(555) 555-1234",
@@ -61,12 +68,12 @@ public class ShipToAddressCreateWorker : BaseWorker
             displayName = customer.Name,
             firstName = customer.Firstname,
             surname = customer.Surname,
-            addressLine1 = CustAddress.Address,
+            addressLine1 = custAddress.Address,
             addressLine2 = "TEST",
-            street = CustAddress.Address,
+            street = custAddress.Address,
             houseNo = "1",
-            postalCode = CustAddress.PostalCode,
-            city = CustAddress.City,
+            postalCode = custAddress.PostalCode,
+            city = custAddress.City,
             country = "DE"
         };
 
@@ -78,21 +85,30 @@ public class ShipToAddressCreateWorker : BaseWorker
         request.Headers.Add("If-Match", "*");
         request.Content = content;
 
+        // =========================
+        // 🔹 Request
+        // =========================
         var response = await _client.SendAsync(request, token);
 
-        // 🔥 Body lesen (für Buffer + Debug)
-        var body = await response.Content.ReadAsStringAsync();
+        // 🔥 wichtig für Connection-Reuse (statt ReadAsStringAsync!)
+        await response.Content.LoadIntoBufferAsync();
 
-        // 🔥 Retry bleibt
+        // =========================
+        // 🔹 Retry + Jitter
+        // =========================
         if (!response.IsSuccessStatusCode)
         {
-            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
+            int status = (int)response.StatusCode;
+
+            if (status == 429 || status >= 500)
             {
-                await Task.Delay(200, token);
+                await Task.Delay(200 + rnd.Next(0, 200), token);
             }
         }
 
-        // 🔥 KEIN throw mehr!
+        // =========================
+        // 🔹 Kein throw
+        // =========================
         return response;
     }
 }

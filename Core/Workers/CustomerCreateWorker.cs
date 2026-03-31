@@ -20,8 +20,8 @@ public class CustomerCreateWorker : BaseWorker
         string companyName,
         int rpm,
         Statistics stats,
-        string workerName)
-        : base(client, stats, workerName, companyName, Math.Max(1, rpm))
+        string workerName, Func<int> getConcurrency)
+            : base(client, stats, workerName, companyName, Math.Max(1, rpm), getConcurrency)
     {
         _customers = customers;
 
@@ -79,7 +79,7 @@ public class CustomerCreateWorker : BaseWorker
         {
             if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
             {
-                await Task.Delay(200, token);
+                await Task.Delay(200 + _rnd.Value!.Next(0, 200), token);
             }
         }
 

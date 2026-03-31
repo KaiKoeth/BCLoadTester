@@ -15,4 +15,6 @@ public class DashboardRow
 
     public double AvgMs { get; set; }
     public long MaxMs { get; set; }
+
+    public double HistoryAvgMs { get; set; }
 }
