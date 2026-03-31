@@ -1418,15 +1418,24 @@ public partial class LoadTestDashboard : Form
 
     private void btnShowData_Click(object sender, EventArgs e)
     {
-        if (_customerPools.Count == 0
-            && _invoiceCustomerNoCache.Count == 0
-            && _creditMemoCustomerNoCache.Count == 0
-            && _orderStatusCache.Count == 0
-            && _webOrderPoolCache.Count == 0)
+
+        bool hasLoadData =
+            _customerPools.Count > 0 ||
+            _invoiceCustomerNoCache.Count > 0 ||
+            _creditMemoCustomerNoCache.Count > 0 ||
+            _orderStatusCache.Count > 0 ||
+            _webOrderPoolCache.Count > 0;
+
+        bool hasHistory =
+            _config?.avgResponseTimesMs != null &&
+            _config.avgResponseTimesMs.Count > 0;
+
+        if (!hasLoadData && !hasHistory)
         {
-            MessageBox.Show("No data loaded.");
+            MessageBox.Show("No data available.");
             return;
         }
+
 
         var form = new Form
         {
@@ -1454,82 +1463,116 @@ public partial class LoadTestDashboard : Form
 
         foreach (var company in companies)
         {
-            sb.AppendLine($"=================================================");
-            sb.AppendLine($"Company: {company}");
-            sb.AppendLine($"=================================================");
-
-            var cfg = _config.companies.First(c => c.name == company);
-
-            // =========================
-            // 🔹 CUSTOMER WORKER POOLS
-            // =========================
-            sb.AppendLine("Customer-based Workers:");
-
-            var workerPools = _customerPools
-                .Where(x => x.Key.Company == company)
-                .OrderBy(x => x.Key.Worker)
-                .ToList();
-
-            foreach (var wp in workerPools)
+            if (hasLoadData)
             {
-                int rpm = cfg.rpm.GetValueOrDefault(wp.Key.Worker, 0);
+                sb.AppendLine($"=================================================");
+                sb.AppendLine($"Company: {company}");
+                sb.AppendLine($"=================================================");
 
-                sb.AppendLine(
-                    $"  {wp.Key.Worker,-25} | Loaded: {wp.Value.Count,6} | RPM: {rpm,4}"
-                );
+                var cfg = _config.companies.First(c => c.name == company);
+
+                // =========================
+                // 🔹 CUSTOMER WORKER POOLS
+                // =========================
+                sb.AppendLine("Customer-based Workers:");
+
+                var workerPools = _customerPools
+                    .Where(x => x.Key.Company == company)
+                    .OrderBy(x => x.Key.Worker)
+                    .ToList();
+
+                foreach (var wp in workerPools)
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault(wp.Key.Worker, 0);
+
+                    sb.AppendLine(
+                        $"  {wp.Key.Worker,-25} | Loaded: {wp.Value.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                sb.AppendLine();
+
+                // =========================
+                // 🔹 INVOICE
+                // =========================
+                if (_invoiceCustomerNoCache.TryGetValue(company, out var inv))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("GetInvoiceDetails", 0);
+
+                    sb.AppendLine(
+                        $"  {"Invoice Customers",-25} | Loaded: {inv.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                // =========================
+                // 🔹 CREDIT MEMO
+                // =========================
+                if (_creditMemoCustomerNoCache.TryGetValue(company, out var cm))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("GetCreMemoDetails", 0);
+
+                    sb.AppendLine(
+                        $"  {"Credit Memo Customers",-25} | Loaded: {cm.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                // =========================
+                // 🔹 ORDER STATUS
+                // =========================
+                if (_orderStatusCache.TryGetValue(company, out var os))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("OrderStatus", 0);
+
+                    sb.AppendLine(
+                        $"  {"OrderStatus Pool",-25} | Loaded: {os.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                // =========================
+                // 🔹 WEB ORDER (NEU!)
+                // =========================
+                if (_webOrderPoolCache.TryGetValue(company, out var wp2))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("WebOrderCreate", 0);
+
+                    sb.AppendLine(
+                        $"  {"WebOrders (required)",-25} | Loaded: {wp2.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                sb.AppendLine();
             }
+        }
 
+        // =========================
+        // 🔥 HISTORISCHE AVG ZEITEN
+        // =========================
+        if (hasHistory)
+        {
             sb.AppendLine();
+            sb.AppendLine("=================================================");
+            sb.AppendLine("Historische Durchschnittswerte (ms)");
+            sb.AppendLine("=================================================");
 
-            // =========================
-            // 🔹 INVOICE
-            // =========================
-            if (_invoiceCustomerNoCache.TryGetValue(company, out var inv))
+            if (_config?.avgResponseTimesMs != null && _config.avgResponseTimesMs.Count > 0)
             {
-                int rpm = cfg.rpm.GetValueOrDefault("GetInvoiceDetails", 0);
+                foreach (var entry in _config.avgResponseTimesMs
+                    .OrderBy(x => x.Key))
+                {
+                    var parts = entry.Key.Split('|');
 
-                sb.AppendLine(
-                    $"  {"Invoice Customers",-25} | Loaded: {inv.Count,6} | RPM: {rpm,4}"
-                );
+                    var company = parts.Length > 0 ? parts[0] : "?";
+                    var worker = parts.Length > 1 ? parts[1] : "?";
+
+                    sb.AppendLine(
+                        $"  {company,-20} | {worker,-25} | Avg: {entry.Value:0} ms"
+                    );
+                }
             }
-
-            // =========================
-            // 🔹 CREDIT MEMO
-            // =========================
-            if (_creditMemoCustomerNoCache.TryGetValue(company, out var cm))
+            else
             {
-                int rpm = cfg.rpm.GetValueOrDefault("GetCreMemoDetails", 0);
-
-                sb.AppendLine(
-                    $"  {"Credit Memo Customers",-25} | Loaded: {cm.Count,6} | RPM: {rpm,4}"
-                );
+                sb.AppendLine("  (keine historischen Werte vorhanden)");
             }
-
-            // =========================
-            // 🔹 ORDER STATUS
-            // =========================
-            if (_orderStatusCache.TryGetValue(company, out var os))
-            {
-                int rpm = cfg.rpm.GetValueOrDefault("OrderStatus", 0);
-
-                sb.AppendLine(
-                    $"  {"OrderStatus Pool",-25} | Loaded: {os.Count,6} | RPM: {rpm,4}"
-                );
-            }
-
-            // =========================
-            // 🔹 WEB ORDER (NEU!)
-            // =========================
-            if (_webOrderPoolCache.TryGetValue(company, out var wp2))
-            {
-                int rpm = cfg.rpm.GetValueOrDefault("WebOrderCreate", 0);
-
-                sb.AppendLine(
-                    $"  {"WebOrders (required)",-25} | Loaded: {wp2.Count,6} | RPM: {rpm,4}"
-                );
-            }
-
-            sb.AppendLine();
         }
 
         textbox.Text = sb.ToString();
