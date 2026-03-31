@@ -2553,7 +2553,7 @@ public partial class LoadTestDashboard : Form
     private int CalculateDynamicConcurrency(
         string company,
         string worker,
-        int rpm,
+        long rpm,
         double avgMs
     )
     {
