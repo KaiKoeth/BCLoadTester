@@ -56,7 +56,17 @@ public class WebOrderCreateWorker : BaseWorker
         _promotionMediumTrgGrpNo = promotionMediumTrgGrpNo ?? "";
         _shippingChargeAmount = shippingChargeAmount;
 
-        _lastBigOrder = DateTime.UtcNow;
+        if (_bigOrderIntervalMinutes > 0)
+        {
+            var offsetSeconds = Random.Shared.Next(0, _bigOrderIntervalMinutes * 60);
+
+            // 🔥 Startzeit zufällig in die Vergangenheit verschieben
+            _lastBigOrder = DateTime.UtcNow - TimeSpan.FromSeconds(offsetSeconds);
+        }
+        else
+        {
+            _lastBigOrder = DateTime.UtcNow;
+        }
     }
 
     protected override async Task<HttpResponseMessage> ExecuteAsync(CancellationToken token)

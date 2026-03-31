@@ -11,11 +11,17 @@ public class LoadController
 
         foreach (var worker in workers)
         {
-            var task = Task.Run(() => worker.Run(_cts.Token));
+            var task = Task.Run(async () =>
+            {
+                // 🔥 NEU: Start-Offset (0–2 Sekunden)
+                await Task.Delay(Random.Shared.Next(0, 2000), _cts.Token);
+
+                await worker.Run(_cts.Token);
+            });
+
             _tasks.Add(task);
         }
     }
-
     public void Stop()
     {
         if (_cts != null)

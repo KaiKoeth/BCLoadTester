@@ -428,13 +428,6 @@ public partial class LoadTestDashboard : Form
         statsBar.Controls.Add(lblStopTime);
         statsBar.Controls.Add(lblRuntime);
         statsBar.Controls.Add(lblConfiguredRpm);
-        statsBar.Controls.Add(new Label { Width = 20 }); // kleiner Abstand
-
-        statsBar.Controls.Add(lblTestProfile);
-        statsBar.Controls.Add(lblRunNo);
-
-        statsBar.Controls.Add(new Label { Width = 30 }); // Abstand zu totals
-
         statsBar.Controls.Add(lblTotalRpm);
         statsBar.Controls.Add(lblTotalRps);
         statsBar.Controls.Add(lblTotalRequests);
@@ -1217,10 +1210,30 @@ public partial class LoadTestDashboard : Form
 
         statsGrid.Rows.Clear();
 
-        double totalRps = 0;
+        // =========================
+        // 🔥 GLOBAL KPIs (NICHT UI-abhängig!)
+        // =========================
         long totalRequests = 0;
         long totalErrors = 0;
 
+        foreach (var row in _allRows)
+        {
+            if (!row.IsGroup)
+            {
+                totalRequests += row.Requests;
+                totalErrors += row.Errors;
+            }
+        }
+
+        double totalRps = runtime.TotalSeconds > 0
+            ? totalRequests / runtime.TotalSeconds
+            : 0;
+
+        double totalRpm = totalRps * 60;
+
+        // =========================
+        // 🔹 GRID (nur Anzeige)
+        // =========================
         foreach (var row in _visibleRows)
         {
             double targetRps = row.RPM / 60.0;
@@ -1229,15 +1242,10 @@ public partial class LoadTestDashboard : Form
                 ? row.Requests / runtime.TotalSeconds
                 : 0;
 
-            totalRps += actualRps;
-            totalRequests += row.Requests;
-            totalErrors += row.Errors;
-
             string companyDisplay = row.IsGroup
                 ? (row.IsExpanded ? "▼ " : "▶ ") + row.Company
                 : "";
 
-            // ✅ HIER war dein Fehler
             string workerDisplay = row.IsGroup
                 ? ""
                 : "    " + (row.DisplayWorker ?? row.Worker);
@@ -1254,19 +1262,21 @@ public partial class LoadTestDashboard : Form
                 row.MaxMs.ToString("0")
             );
 
+            // 🔥 Group Styling
             if (row.IsGroup)
             {
                 statsGrid.Rows[rowIndex].DefaultCellStyle.Font =
                     new Font(statsGrid.Font, FontStyle.Bold);
             }
 
+            // 🔥 Error Highlight
             var errorCell = statsGrid.Rows[rowIndex].Cells[4];
             errorCell.Style.ForeColor = row.Errors > 0 ? Color.Red : Color.Black;
-
-
         }
-        var totalRpm = totalRps * 60;
 
+        // =========================
+        // 🔥 KPI UPDATE (sauber)
+        // =========================
         lblTotalRpm.Text = $"Total RPM: {totalRpm:0}";
         lblTotalRps.Text = $"Total RPS: {totalRps:0.00}";
         lblTotalRequests.Text = $"Total Requests: {totalRequests}";

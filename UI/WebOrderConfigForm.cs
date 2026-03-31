@@ -18,6 +18,7 @@ public class WebOrderConfigForm : Form
     // 🔥 NEU: Initial State
     private string _initialState;
 
+
     public WebOrderConfigForm(WebOrderConfig config)
     {
         _config = config;
@@ -26,6 +27,8 @@ public class WebOrderConfigForm : Form
         Width = 400;
         Height = 420;
         StartPosition = FormStartPosition.CenterParent;
+
+        var toolTip = new ToolTip();
 
         var layout = new TableLayoutPanel
         {
@@ -45,6 +48,29 @@ public class WebOrderConfigForm : Form
         numBigLines = CreateNumber(_config.bigOrderLines, 1000);
         numInterval = CreateNumber(_config.bigOrderIntervalMinutes, 3600);
 
+        numInterval = CreateNumber(_config.bigOrderIntervalMinutes, 3600);
+
+        // 🔥 TOOLTIP
+        toolTip = new ToolTip();
+        toolTip.SetToolTip(numInterval, "0 = keine Bigorders");
+
+        // 🔥 UX + LOGIK
+        void UpdateBigOrderUi()
+        {
+            bool enabled = numInterval.Value > 0;
+
+            numBigLines.Enabled = enabled;
+
+            numInterval.BackColor = enabled
+                ? SystemColors.Window
+                : Color.LightGray;
+        }
+
+        // 🔥 Event
+        numInterval.ValueChanged += (s, e) => UpdateBigOrderUi();
+
+        // 🔥 Initial anwenden
+        UpdateBigOrderUi();
         txtPromotion = new TextBox
         {
             Text = _config.promotionMediumNo ?? "",

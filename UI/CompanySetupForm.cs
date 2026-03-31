@@ -42,7 +42,6 @@ public class CompanySetupForm : Form
             RowHeadersVisible = false,
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
         };
-
         grid.CellValueChanged += (s, e) => MarkDirty();
 
         grid.CurrentCellDirtyStateChanged += (s, e) =>
@@ -52,7 +51,6 @@ public class CompanySetupForm : Form
         };
 
         grid.ColumnHeaderMouseClick += Grid_HeaderClick;
-        grid.CellDoubleClick += Grid_CellDoubleClick;
         grid.CellClick += Grid_CellClick;
 
         grid.CellToolTipTextNeeded += Grid_CellToolTipTextNeeded;
@@ -128,11 +126,18 @@ public class CompanySetupForm : Form
     {
         grid.Columns.Clear();
 
-        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "enabled", HeaderText = "Enabled" });
+        // 🔹 Basis-Spalten
+        grid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "enabled",
+            HeaderText = "Enabled"
+        });
+
         grid.Columns.Add("company", "Company");
         grid.Columns.Add("serviceRoot", "Service Root");
         grid.Columns.Add("apiRoot", "API Root");
 
+        // 🔹 API Test
         var apiTestCol = new DataGridViewButtonColumn
         {
             Name = "apiTest",
@@ -142,18 +147,40 @@ public class CompanySetupForm : Form
         };
         grid.Columns.Add(apiTestCol);
 
+        // 🔹 Worker + ggf. WebOrder Config daneben
         foreach (var worker in _config.workers)
         {
+            // Worker-Spalte
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = worker.type,
                 HeaderText = $"{(worker.enabled ? "☑" : "☐")} {worker.type}",
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
+
+            // 🔥 Direkt nach WebOrderCreate: Config-Spalte
+            if (worker.type.Equals("WebOrderCreate", StringComparison.OrdinalIgnoreCase))
+            {
+                var webOrderConfigCol = new DataGridViewButtonColumn
+                {
+                    Name = "webOrderConfig",
+                    HeaderText = "WebOrder Config",
+                    Text = "⚙",
+                    UseColumnTextForButtonValue = true,
+                    Width = 120,
+                    FlatStyle = FlatStyle.Flat
+                };
+
+                grid.Columns.Add(webOrderConfigCol);
+            }
         }
 
+        // 🔹 ReadOnly Einstellungen
         grid.Columns["company"].ReadOnly = true;
         grid.Columns["apiTest"].ReadOnly = true;
+
+        if (grid.Columns.Contains("webOrderConfig"))
+            grid.Columns["webOrderConfig"].ReadOnly = true;
     }
 
     void LoadCompanies()
@@ -163,17 +190,24 @@ public class CompanySetupForm : Form
         foreach (var c in _config.companies)
         {
             var values = new List<object>
-            {
-                c.enabled,
-                c.name,
-                c.serviceRoot ?? "",
-                c.apiRoot ?? "",
-                "Test"
-            };
+        {
+            c.enabled,
+            c.name,
+            c.serviceRoot ?? "",
+            c.apiRoot ?? "",
+            "Test"
+        };
 
             foreach (var worker in _config.workers)
             {
+                // 👉 Worker-Wert
                 values.Add(GetRpm(c, worker.type));
+
+                // 👉 Wenn WebOrderCreate → direkt danach ⚙ einfügen
+                if (worker.type.Equals("WebOrderCreate", StringComparison.OrdinalIgnoreCase))
+                {
+                    values.Add("⚙");
+                }
             }
 
             grid.Rows.Add(values.ToArray());
@@ -208,6 +242,12 @@ public class CompanySetupForm : Form
                 var value = row.Cells[colIndex].Value?.ToString() ?? "0";
                 SetRpm(company, worker.type, value);
                 colIndex++;
+
+                // 🔥 WICHTIG: ⚙-Spalte überspringen
+                if (worker.type.Equals("WebOrderCreate", StringComparison.OrdinalIgnoreCase))
+                {
+                    colIndex++; // skip config column
+                }
             }
 
             if (company.webOrderConfig == null)
@@ -249,24 +289,6 @@ public class CompanySetupForm : Form
         }
     }
 
-    void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
-    {
-        if (e.RowIndex < 0 || e.ColumnIndex < 0)
-            return;
-
-        if (grid.Columns[e.ColumnIndex].Name != "WebOrderCreate")
-            return;
-
-        var company = _config.companies[e.RowIndex];
-
-        if (company.webOrderConfig == null)
-            company.webOrderConfig = new WebOrderConfig();
-
-        using var form = new WebOrderConfigForm(company.webOrderConfig);
-        form.ShowDialog(this);
-
-        MarkDirty();
-    }
 
     void Grid_CellToolTipTextNeeded(object sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
@@ -276,6 +298,7 @@ public class CompanySetupForm : Form
         var column = grid.Columns[e.ColumnIndex].Name;
         var company = _config.companies[e.RowIndex];
 
+        // 🔥 API Tooltip
         if (column == "apiTest")
         {
             var serviceRoot = string.IsNullOrWhiteSpace(company.serviceRoot)
@@ -290,21 +313,24 @@ public class CompanySetupForm : Form
             return;
         }
 
-        if (column != "WebOrderCreate")
-            return;
-
-        var cfg = company.webOrderConfig;
-
-        if (cfg == null)
+        // 🔥 WebOrder Tooltip
+        if (column == "webOrderConfig")
         {
-            e.ToolTipText = "No WebOrder config\nDouble click to edit";
+            var cfg = company.webOrderConfig;
+
+            if (cfg == null)
+            {
+                e.ToolTipText = "WebOrder konfigurieren";
+                return;
+            }
+
+            e.ToolTipText =
+                $"⚙ WebOrder Settings\n" +
+                $"Lines: {cfg.minLines}-{cfg.maxLines}\n" +
+                $"BigOrder: {cfg.bigOrderLines} / {cfg.bigOrderIntervalMinutes} min";
+
             return;
         }
-
-        e.ToolTipText =
-            $"⚙ WebOrder Settings\n" +
-            $"Lines: {cfg.minLines}-{cfg.maxLines}\n" +
-            $"BigOrder: {cfg.bigOrderLines} / {cfg.bigOrderIntervalMinutes} min";
     }
 
     void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
@@ -312,7 +338,7 @@ public class CompanySetupForm : Form
         if (e.RowIndex < 0 || e.ColumnIndex < 0)
             return;
 
-        if (grid.Columns[e.ColumnIndex].Name == "WebOrderCreate")
+        if (grid.Columns[e.ColumnIndex].Name == "webOrderConfig")
             grid.Cursor = Cursors.Hand;
     }
 
@@ -482,11 +508,37 @@ public class CompanySetupForm : Form
         if (e.RowIndex < 0 || e.ColumnIndex < 0)
             return;
 
-        if (grid.Columns[e.ColumnIndex].Name != "apiTest")
+        var columnName = grid.Columns[e.ColumnIndex].Name;
+
+        // 🔥 API Test (bestehend)
+        if (columnName == "apiTest")
+        {
+            var company = _config.companies[e.RowIndex];
+            await TestApiForCompany(company, e.RowIndex);
             return;
+        }
 
-        var company = _config.companies[e.RowIndex];
-
-        await TestApiForCompany(company, e.RowIndex);
+        // 🔥 NEU: WebOrder Drilldown per Click
+        if (columnName == "webOrderConfig")
+        {
+            OpenWebOrderConfig(e.RowIndex);
+            return;
+        }
     }
+
+    void OpenWebOrderConfig(int rowIndex)
+    {
+        var company = _config.companies[rowIndex];
+
+        if (company.webOrderConfig == null)
+            company.webOrderConfig = new WebOrderConfig();
+
+        using var form = new WebOrderConfigForm(company.webOrderConfig);
+
+        if (form.ShowDialog(this) == DialogResult.OK)
+        {
+            MarkDirty(); // 🔥 nur wenn wirklich geändert
+        }
+    }
+
 }
