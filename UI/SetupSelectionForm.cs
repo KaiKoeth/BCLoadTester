@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows.Forms;
 
 namespace BCLoadtester.config;
@@ -7,12 +8,18 @@ public class SetupSelectionForm : Form
 {
     private AppConfig _config;
 
+    // 🔥 NEU: Dynamic Concurrency vom Dashboard
+    private readonly Dictionary<(string Company, string Worker), int> _dynamicConcurrency;
+
     // 🔥 NEU: Change Tracking
     private bool _changed = false;
 
-    public SetupSelectionForm(AppConfig config)
+    public SetupSelectionForm(
+        AppConfig config,
+        Dictionary<(string Company, string Worker), int> dynamicConcurrency)
     {
         _config = config;
+        _dynamicConcurrency = dynamicConcurrency;
 
         Text = "Setup";
         Width = 320;
@@ -61,7 +68,7 @@ public class SetupSelectionForm : Form
         };
 
         // =========================
-        // 🔥 EVENTS (JETZT MIT CHANGE TRACKING)
+        // 🔥 EVENTS
         // =========================
 
         btnConnection.Click += (s, e) =>
@@ -69,16 +76,18 @@ public class SetupSelectionForm : Form
             var dlg = new ConnectionSetupForm(_config);
             if (dlg.ShowDialog(this) == DialogResult.OK)
             {
-                _changed = true; // 🔥 NEU
+                _changed = true;
             }
         };
 
         btnCompany.Click += (s, e) =>
         {
-            var dlg = new CompanySetupForm(_config);
+            // 🔥 FIX: korrekt instanziieren + dynamicConcurrency übergeben
+            var dlg = new CompanySetupForm(_config, _dynamicConcurrency);
+
             if (dlg.ShowDialog(this) == DialogResult.OK)
             {
-                _changed = true; // 🔥 NEU
+                _changed = true;
             }
         };
 
@@ -87,7 +96,7 @@ public class SetupSelectionForm : Form
             var dlg = new WorkerSetupForm(_config);
             if (dlg.ShowDialog(this) == DialogResult.OK)
             {
-                _changed = true; // 🔥 NEU
+                _changed = true;
             }
         };
 
@@ -127,7 +136,6 @@ public class SetupSelectionForm : Form
 
             MessageBox.Show("Config saved successfully.", "Success");
 
-            // 🔥 OPTIONAL: zählt als Änderung
             _changed = true;
         }
         catch (Exception ex)
@@ -163,7 +171,6 @@ public class SetupSelectionForm : Form
         {
             var newConfig = ConfigLoader.LoadFrom(dialog.FileName);
 
-            // 🔥 Werte übernehmen
             _config.serviceRoot = newConfig.serviceRoot;
             _config.apiRoot = newConfig.apiRoot;
             _config.username = newConfig.username;
@@ -189,7 +196,6 @@ public class SetupSelectionForm : Form
                 "Config loaded successfully.\nPlease reload data in dashboard.",
                 "Success");
 
-            // 🔥 WICHTIG: Änderung markieren
             _changed = false;
         }
         catch (Exception ex)
@@ -199,13 +205,10 @@ public class SetupSelectionForm : Form
     }
 
     // =========================
-    // 🔥 WICHTIG: DialogResult steuern
+    // 🔥 DialogResult Steuerung
     // =========================
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        // ❌ KEINE eigene Nachfrage mehr!
-        // Sub-Forms kümmern sich bereits darum
-
         this.DialogResult = _changed
             ? DialogResult.OK
             : DialogResult.Cancel;

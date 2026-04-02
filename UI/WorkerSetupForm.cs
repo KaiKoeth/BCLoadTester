@@ -13,7 +13,7 @@ public class WorkerSetupForm : Form
         _config = config;
 
         Text = "Worker Setup";
-        Width = 1000;
+        Width = 1100;
         Height = 520;
         StartPosition = FormStartPosition.CenterParent;
 
@@ -49,6 +49,14 @@ public class WorkerSetupForm : Form
         };
         grid.Columns.Add(enabledCol);
 
+        // 🔥 NEW: Concurrency Column
+        var concurrencyCol = new DataGridViewTextBoxColumn
+        {
+            Name = "maxConcurrency",
+            HeaderText = "Max Concurrency"
+        };
+        grid.Columns.Add(concurrencyCol);
+
         // 🔥 Buffer Factor
         var bufferCol = new DataGridViewTextBoxColumn
         {
@@ -58,6 +66,17 @@ public class WorkerSetupForm : Form
         grid.Columns.Add(bufferCol);
 
         grid.Columns["type"].ReadOnly = true;
+
+        // 🔥 TOOLTIP (Header)
+        grid.Columns["maxConcurrency"].HeaderCell.ToolTipText =
+            "Maximale parallele Requests pro Worker\n\n" +
+            "Leer = globaler Wert wird verwendet\n" +
+            "Hoch = mehr Last / mehr Druck auf Backend\n" +
+            "Niedrig = stabiler aber weniger Durchsatz\n\n" +
+            "Typisch:\n" +
+            "Search: 10–20\n" +
+            "Order: 20–50\n" +
+            "Posting: 5–10";
 
         LoadWorkers();
 
@@ -77,7 +96,6 @@ public class WorkerSetupForm : Form
 
     private void WorkerSetupForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
-        // 🔥 KEINE Änderungen → kein Reload
         if (!_isDirty)
         {
             this.DialogResult = DialogResult.Cancel;
@@ -102,7 +120,6 @@ public class WorkerSetupForm : Form
             Save();
         }
 
-        // 🔥 WICHTIG: Änderungen vorhanden → OK zurückgeben
         this.DialogResult = DialogResult.OK;
     }
 
@@ -121,6 +138,7 @@ public class WorkerSetupForm : Form
                 w.type,
                 w.endpoint,
                 w.enabled,
+                w.maxConcurrency?.ToString() ?? "", // 🔥 leer = global
                 buffer.ToString("0.00")
             );
         }
@@ -141,7 +159,23 @@ public class WorkerSetupForm : Form
             worker.endpoint = row.Cells["endpoint"].Value?.ToString() ?? "";
             worker.enabled = Convert.ToBoolean(row.Cells["enabled"].Value);
 
-            // 🔥 Buffer sauber parsen + validieren
+            // 🔥 Concurrency (optional!)
+            var concText = row.Cells["maxConcurrency"].Value?.ToString();
+
+            if (string.IsNullOrWhiteSpace(concText))
+            {
+                worker.maxConcurrency = null; // 🔥 global fallback
+            }
+            else if (int.TryParse(concText, out int c))
+            {
+                worker.maxConcurrency = Math.Max(1, c);
+            }
+            else
+            {
+                worker.maxConcurrency = null;
+            }
+
+            // 🔥 Buffer sauber parsen
             var bufferText = row.Cells["buffer"].Value?.ToString();
 
             if (double.TryParse(bufferText, out double buffer))

@@ -38,6 +38,7 @@ public partial class LoadTestDashboard : Form
     ProgressBar progressLoading;
     private const int PoolWarningThreshold = 500;
     private const int PoolCriticalThreshold = 250;
+    private Dictionary<(string Company, string Worker), int> _dynamicConcurrency = new();
     private NumericUpDown numTestDuration;
     private NumericUpDown numRemainingMinutes;
     private DateTime? _endTime;
@@ -69,7 +70,6 @@ public partial class LoadTestDashboard : Form
     public LoadTestDashboard()
     {
         InitializeComponent();
-        InitializeApp();
 
         _process = Process.GetCurrentProcess();
 
@@ -212,7 +212,7 @@ public partial class LoadTestDashboard : Form
                 return;
             }
 
-            var dlg = new SetupSelectionForm(_config);
+            var dlg = new SetupSelectionForm(_config, _dynamicConcurrency);
 
             if (dlg.ShowDialog(this) == DialogResult.OK)
             {
@@ -444,7 +444,7 @@ public partial class LoadTestDashboard : Form
             RowHeadersVisible = false
         };
 
-        statsGrid.ColumnCount = 9;
+        statsGrid.ColumnCount = 10;
         statsGrid.Columns[0].Name = "Company";
         statsGrid.Columns[1].Name = "Worker";
         statsGrid.Columns[2].Name = "RPM";
@@ -452,8 +452,9 @@ public partial class LoadTestDashboard : Form
         statsGrid.Columns[4].Name = "Errors";
         statsGrid.Columns[5].Name = "Target RPS";
         statsGrid.Columns[6].Name = "Actual RPS";
-        statsGrid.Columns[7].Name = "Avg ms";
-        statsGrid.Columns[8].Name = "Max ms";
+        statsGrid.Columns[7].Name = "Avg ms (current)";
+        statsGrid.Columns[8].Name = "Avg ms (history)";
+        statsGrid.Columns[9].Name = "Max ms";
 
         statsGrid.CellClick += statsGrid_CellClick;
 
@@ -517,14 +518,17 @@ public partial class LoadTestDashboard : Form
                 return string.Compare(a.Worker, b.Worker, StringComparison.Ordinal);
             });
 
+            AdjustConcurrency();
             if (_cachedStats.Count > 0)
             {
                 BuildRows(_cachedStats);
             }
             RefreshGrid(runtime);
-
             UpdatePoolWarnings();
+
+
         };
+        InitializeApp();
         timer.Start();
     }
 
@@ -535,6 +539,17 @@ public partial class LoadTestDashboard : Form
         {
             MessageBox.Show("Test duration changed. Please reload data.");
             return;
+        }
+
+        if (_client == null)
+        {
+            _client = new HttpClient(new SocketsHttpHandler
+            {
+                MaxConnectionsPerServer = _config.maxConnectionsPerServer,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                EnableMultipleHttp2Connections = true
+            });
         }
 
         if (_config == null ||
@@ -650,16 +665,23 @@ public partial class LoadTestDashboard : Form
 
                 // 🔥 WICHTIG: Parallelisierung wieder rein
                 int parallelWorkers = Math.Clamp(
-                    rpm / _config.rpmPerWorker,
+                    (int)Math.Ceiling((double)rpm / _config.rpmPerWorker),
                     1,
                     _config.maxWorkersPerType);
 
-                int workerRpm = Math.Max(1, rpm / parallelWorkers);
+                int workerRpm = (int)Math.Ceiling((double)rpm / parallelWorkers);
                 string workerKey = worker.type;
                 _workerCounts[(company.name, workerKey)] = parallelWorkers;
                 string workerDisplayName = $"{worker.type} (x{parallelWorkers})";
                 for (int i = 0; i < parallelWorkers; i++)
                 {
+                    Func<int> concurrencyFunc = () =>
+                    {
+                        if (_dynamicConcurrency.TryGetValue((company.name, worker.type), out var val))
+                            return val;
+
+                        return ResolveConcurrency(worker); // fallback
+                    };
                     switch (worker.type)
                     {
                         case "EmailSearch":
@@ -673,7 +695,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerKey));
+                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -681,14 +703,13 @@ public partial class LoadTestDashboard : Form
                             {
                                 if (!_customerPools.TryGetValue((company.name, worker.type), out var pmcCustomers) || pmcCustomers.Count == 0)
                                     break;
-
                                 workers.Add(new PhoneticSearchWorker(
                                     _client, pmcCustomers,
                                     serviceRoot,
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerKey));
+                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -698,12 +719,12 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new CustomerCreateWorker(
-                                    _client, createCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client, createCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -713,12 +734,12 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new ShipToAddressCreateWorker(
-                                    _client, shipToCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client, shipToCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -728,34 +749,35 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new CustomerHistoryWorker(
-                                    _client,
-                                    historyCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    historyCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
                         case "WebOrderCreate":
                             {
                                 workers.Add(new WebOrderCreateWorker(
-                                    _client,
-                                    orderStatusPool,
-                                    webOrderPool,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats,
-                                    workerKey,
-                                    company.webOrderConfig?.bigOrderLines ?? 0,
-                                    company.webOrderConfig?.bigOrderIntervalMinutes ?? 0,
-                                    company.webOrderConfig?.promotionMediumNo,
-                                    company.webOrderConfig?.promotionMediumTrgGrpNo,
-                                    company.webOrderConfig?.shippingChargeAmount ?? 0
-                                ));
+                                                                    _client,
+                                                                    orderStatusPool,
+                                                                    webOrderPool,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats,
+                                                                    workerKey,
+                                                                    concurrencyFunc,
+                                                                    company.webOrderConfig?.bigOrderLines ?? 0,
+                                                                    company.webOrderConfig?.bigOrderIntervalMinutes ?? 0,
+                                                                    company.webOrderConfig?.promotionMediumNo,
+                                                                    company.webOrderConfig?.promotionMediumTrgGrpNo,
+                                                                    company.webOrderConfig?.shippingChargeAmount ?? 0
+                                                                ));
                                 break;
                             }
 
@@ -765,12 +787,12 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new GetInvoiceDetailsWorker(
-                                    _client,
-                                    invoiceCustomers,
-                                    serviceRoot, apiRoot,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    invoiceCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -780,26 +802,28 @@ public partial class LoadTestDashboard : Form
                                     break;
 
                                 workers.Add(new GetCreMemoDetailsWorker(
-                                    _client,
-                                    creditMemoCustomers,
-                                    serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    creditMemoCustomers,
+                                                                    serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
 
                         case "OrderStatus":
                             {
+                                if (orderStatusPool.Count == 0)
+                                    break;
                                 workers.Add(new OrderStatusWorker(
-                                    _client,
-                                    orderStatusPool,
-                                     serviceRoot, apiRoot,
-                                    worker.endpoint,
-                                    company.guid, company.name,
-                                    workerRpm,
-                                    _stats, workerKey));
+                                                                    _client,
+                                                                    orderStatusPool,
+                                                                     serviceRoot, apiRoot,
+                                                                    worker.endpoint,
+                                                                    company.guid, company.name,
+                                                                    workerRpm,
+                                                                    _stats, workerKey, concurrencyFunc));
                                 break;
                             }
                     }
@@ -807,6 +831,18 @@ public partial class LoadTestDashboard : Form
 
             }
 
+        }
+
+        // 🔥 INITIAL CONCURRENCY setzen (WICHTIG!)
+        _dynamicConcurrency.Clear();
+
+        foreach (var company in _config.companies.Where(c => c.enabled))
+        {
+            foreach (var worker in _config.workers.Where(w => w.enabled))
+            {
+                _dynamicConcurrency[(company.name, worker.type)] =
+                    ResolveConcurrency(worker); // Startwert
+            }
         }
 
         _controller = new LoadController();
@@ -883,11 +919,25 @@ public partial class LoadTestDashboard : Form
         try
         {
             _config = ConfigLoader.Load();
-            _client = new HttpClient(new SocketsHttpHandler
-            {
-                MaxConnectionsPerServer = _config.maxConnectionsPerServer
-            });
 
+            bool loaded;
+
+            _config.avgResponseTimesMs =
+                LoadtestStatsLoader.LoadAvgResponseTimes(_config, out loaded);
+
+            // 🔥 Safety
+            _config.avgResponseTimesMs ??= new Dictionary<string, double>();
+
+            if (loaded && _config.avgResponseTimesMs.Count > 0)
+            {
+                lblStatus.Text = "Historische Durchschnittswerte geladen";
+                lblStatus.ForeColor = Color.DarkGreen;
+            }
+            if (!loaded)
+            {
+                lblStatus.Text = "SQL connection failed (LoadtestStats)";
+                lblStatus.ForeColor = Color.Red;
+            }
         }
         catch (Exception ex)
         {
@@ -899,6 +949,33 @@ public partial class LoadTestDashboard : Form
     {
         if (_config == null)
             return;
+
+        // =========================
+        // 🔥 HISTORIE NACHLADEN (FALLBACK)
+        // =========================
+        if (_config.avgResponseTimesMs == null || _config.avgResponseTimesMs.Count == 0)
+        {
+            lblStatus.Text = "Loading historical response times...";
+            lblStatus.ForeColor = Color.DarkOrange;
+            Application.DoEvents();
+
+            bool loaded;
+
+            var history = LoadtestStatsLoader.LoadAvgResponseTimes(_config, out loaded);
+
+            if (loaded && history.Count > 0)
+            {
+                _config.avgResponseTimesMs = history;
+
+                lblStatus.Text = "Historical response times loaded";
+                lblStatus.ForeColor = Color.DarkGreen;
+            }
+            else
+            {
+                lblStatus.Text = "No historical data available (or SQL failed)";
+                lblStatus.ForeColor = Color.Gray;
+            }
+        }
 
         int durationMinutes = (int)numTestDuration.Value;
 
@@ -1141,6 +1218,8 @@ public partial class LoadTestDashboard : Form
 
 
             // 🔹 Gruppenzeile
+            double histAvg = CalculateCompanyHistoryAvg(companyName, companyGroup);
+
             _allRows.Add(new DashboardRow
             {
                 Company = companyName,
@@ -1151,13 +1230,23 @@ public partial class LoadTestDashboard : Form
 
                 Requests = companyGroup.Sum(x => x.Requests),
                 Errors = companyGroup.Sum(x => x.Errors),
+
+
+                // 👉 optional: Live behalten
                 AvgMs = companyGroup.Average(x => x.AvgMs),
-                MaxMs = companyGroup.Max(x => x.MaxMs)
+
+                // 👉 NEU: History in MaxMs NICHT, sondern extra (kommt gleich)
+                MaxMs = companyGroup.Max(x => x.MaxMs),
+
+                // 👉 NEU (wenn du Feld ergänzt hast)
+                HistoryAvgMs = histAvg
+
             });
 
             // 🔹 Worker-Zeilen
             foreach (var w in companyGroup)
             {
+
                 string displayWorker = w.Worker;
 
                 // ✅ WICHTIG: (xN) aus Cache holen (NICHT aus String!)
@@ -1177,8 +1266,9 @@ public partial class LoadTestDashboard : Form
                 if (w.Worker == "WebOrderCreate")
                 {
                     var bigOrders = _stats.GetCustomMetric(w.Worker, companyName, "BigOrders");
-                    displayWorker += $" [{bigOrders}]";
 
+                    if (bigOrders > 0)
+                        displayWorker += $" | BO: {bigOrders}";
                 }
 
                 _allRows.Add(new DashboardRow
@@ -1188,16 +1278,13 @@ public partial class LoadTestDashboard : Form
                     DisplayWorker = displayWorker,
                     IsGroup = false,
 
-                    RPM = w.Rpm * (
-                         _workerCounts.TryGetValue((companyName, w.Worker), out count)
-                             ? count
-                             : 1
-                     ),
+                    RPM = GetConfiguredWorkerRpm(companyName, w.Worker),
 
                     Requests = w.Requests,
                     Errors = w.Errors,
                     AvgMs = w.AvgMs,
-                    MaxMs = w.MaxMs
+                    MaxMs = w.MaxMs,
+                    HistoryAvgMs = GetHistoricalAvgMs(companyName, w.Worker)
                 });
             }
         }
@@ -1250,6 +1337,11 @@ public partial class LoadTestDashboard : Form
                 ? ""
                 : "    " + (row.DisplayWorker ?? row.Worker);
 
+            // 🔥 NEU: historische Responsezeit holen
+            double histMs = row.IsGroup
+     ? row.HistoryAvgMs   // 🔥 DAS IST DER FIX
+     : GetHistoricalAvgMs(row.Company, row.Worker);
+
             int rowIndex = statsGrid.Rows.Add(
                 companyDisplay,
                 workerDisplay,
@@ -1259,6 +1351,7 @@ public partial class LoadTestDashboard : Form
                 targetRps.ToString("0.00"),
                 actualRps.ToString("0.00"),
                 row.AvgMs.ToString("0"),
+                histMs.ToString("0"),
                 row.MaxMs.ToString("0")
             );
 
@@ -1367,15 +1460,24 @@ public partial class LoadTestDashboard : Form
 
     private void btnShowData_Click(object sender, EventArgs e)
     {
-        if (_customerPools.Count == 0
-            && _invoiceCustomerNoCache.Count == 0
-            && _creditMemoCustomerNoCache.Count == 0
-            && _orderStatusCache.Count == 0
-            && _webOrderPoolCache.Count == 0)
+
+        bool hasLoadData =
+            _customerPools.Count > 0 ||
+            _invoiceCustomerNoCache.Count > 0 ||
+            _creditMemoCustomerNoCache.Count > 0 ||
+            _orderStatusCache.Count > 0 ||
+            _webOrderPoolCache.Count > 0;
+
+        bool hasHistory =
+            _config?.avgResponseTimesMs != null &&
+            _config.avgResponseTimesMs.Count > 0;
+
+        if (!hasLoadData && !hasHistory)
         {
-            MessageBox.Show("No data loaded.");
+            MessageBox.Show("No data available.");
             return;
         }
+
 
         var form = new Form
         {
@@ -1403,82 +1505,116 @@ public partial class LoadTestDashboard : Form
 
         foreach (var company in companies)
         {
-            sb.AppendLine($"=================================================");
-            sb.AppendLine($"Company: {company}");
-            sb.AppendLine($"=================================================");
-
-            var cfg = _config.companies.First(c => c.name == company);
-
-            // =========================
-            // 🔹 CUSTOMER WORKER POOLS
-            // =========================
-            sb.AppendLine("Customer-based Workers:");
-
-            var workerPools = _customerPools
-                .Where(x => x.Key.Company == company)
-                .OrderBy(x => x.Key.Worker)
-                .ToList();
-
-            foreach (var wp in workerPools)
+            if (hasLoadData)
             {
-                int rpm = cfg.rpm.GetValueOrDefault(wp.Key.Worker, 0);
+                sb.AppendLine($"=================================================");
+                sb.AppendLine($"Company: {company}");
+                sb.AppendLine($"=================================================");
 
-                sb.AppendLine(
-                    $"  {wp.Key.Worker,-25} | Loaded: {wp.Value.Count,6} | RPM: {rpm,4}"
-                );
+                var cfg = _config.companies.First(c => c.name == company);
+
+                // =========================
+                // 🔹 CUSTOMER WORKER POOLS
+                // =========================
+                sb.AppendLine("Customer-based Workers:");
+
+                var workerPools = _customerPools
+                    .Where(x => x.Key.Company == company)
+                    .OrderBy(x => x.Key.Worker)
+                    .ToList();
+
+                foreach (var wp in workerPools)
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault(wp.Key.Worker, 0);
+
+                    sb.AppendLine(
+                        $"  {wp.Key.Worker,-25} | Loaded: {wp.Value.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                sb.AppendLine();
+
+                // =========================
+                // 🔹 INVOICE
+                // =========================
+                if (_invoiceCustomerNoCache.TryGetValue(company, out var inv))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("GetInvoiceDetails", 0);
+
+                    sb.AppendLine(
+                        $"  {"Invoice Customers",-25} | Loaded: {inv.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                // =========================
+                // 🔹 CREDIT MEMO
+                // =========================
+                if (_creditMemoCustomerNoCache.TryGetValue(company, out var cm))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("GetCreMemoDetails", 0);
+
+                    sb.AppendLine(
+                        $"  {"Credit Memo Customers",-25} | Loaded: {cm.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                // =========================
+                // 🔹 ORDER STATUS
+                // =========================
+                if (_orderStatusCache.TryGetValue(company, out var os))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("OrderStatus", 0);
+
+                    sb.AppendLine(
+                        $"  {"OrderStatus Pool",-25} | Loaded: {os.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                // =========================
+                // 🔹 WEB ORDER (NEU!)
+                // =========================
+                if (_webOrderPoolCache.TryGetValue(company, out var wp2))
+                {
+                    int rpm = cfg.rpm.GetValueOrDefault("WebOrderCreate", 0);
+
+                    sb.AppendLine(
+                        $"  {"WebOrders (required)",-25} | Loaded: {wp2.Count,6} | RPM: {rpm,4}"
+                    );
+                }
+
+                sb.AppendLine();
             }
+        }
 
+        // =========================
+        // 🔥 HISTORISCHE AVG ZEITEN
+        // =========================
+        if (hasHistory)
+        {
             sb.AppendLine();
+            sb.AppendLine("=================================================");
+            sb.AppendLine("Historische Durchschnittswerte (ms)");
+            sb.AppendLine("=================================================");
 
-            // =========================
-            // 🔹 INVOICE
-            // =========================
-            if (_invoiceCustomerNoCache.TryGetValue(company, out var inv))
+            if (_config?.avgResponseTimesMs != null && _config.avgResponseTimesMs.Count > 0)
             {
-                int rpm = cfg.rpm.GetValueOrDefault("GetInvoiceDetails", 0);
+                foreach (var entry in _config.avgResponseTimesMs
+                    .OrderBy(x => x.Key))
+                {
+                    var parts = entry.Key.Split('|');
 
-                sb.AppendLine(
-                    $"  {"Invoice Customers",-25} | Loaded: {inv.Count,6} | RPM: {rpm,4}"
-                );
+                    var company = parts.Length > 0 ? parts[0] : "?";
+                    var worker = parts.Length > 1 ? parts[1] : "?";
+
+                    sb.AppendLine(
+                        $"  {company,-20} | {worker,-25} | Avg: {entry.Value:0} ms"
+                    );
+                }
             }
-
-            // =========================
-            // 🔹 CREDIT MEMO
-            // =========================
-            if (_creditMemoCustomerNoCache.TryGetValue(company, out var cm))
+            else
             {
-                int rpm = cfg.rpm.GetValueOrDefault("GetCreMemoDetails", 0);
-
-                sb.AppendLine(
-                    $"  {"Credit Memo Customers",-25} | Loaded: {cm.Count,6} | RPM: {rpm,4}"
-                );
+                sb.AppendLine("  (keine historischen Werte vorhanden)");
             }
-
-            // =========================
-            // 🔹 ORDER STATUS
-            // =========================
-            if (_orderStatusCache.TryGetValue(company, out var os))
-            {
-                int rpm = cfg.rpm.GetValueOrDefault("OrderStatus", 0);
-
-                sb.AppendLine(
-                    $"  {"OrderStatus Pool",-25} | Loaded: {os.Count,6} | RPM: {rpm,4}"
-                );
-            }
-
-            // =========================
-            // 🔹 WEB ORDER (NEU!)
-            // =========================
-            if (_webOrderPoolCache.TryGetValue(company, out var wp2))
-            {
-                int rpm = cfg.rpm.GetValueOrDefault("WebOrderCreate", 0);
-
-                sb.AppendLine(
-                    $"  {"WebOrders (required)",-25} | Loaded: {wp2.Count,6} | RPM: {rpm,4}"
-                );
-            }
-
-            sb.AppendLine();
         }
 
         textbox.Text = sb.ToString();
@@ -1912,6 +2048,23 @@ public partial class LoadTestDashboard : Form
             bool isExpanded = false;
 
             // 🔹 Gruppenzeile
+            double histAvg = CalculateCompanyHistoryAvg(
+               company.name,
+               _config.workers
+                   .Where(w => w.enabled)
+                   .Select(w => (
+                       Worker: w.type,
+                       Company: company.name,
+                       Rpm: (long)(company.rpm.GetValueOrDefault(w.type, 0)),
+                       Requests: 0L,
+                       Errors: 0L,
+                       Rps: 0.0,
+                       PoolSize: 0,
+                       AvgMs: 0.0,
+                       MaxMs: 0L
+                   ))
+           );
+
             _allRows.Add(new DashboardRow
             {
                 Company = company.name,
@@ -1921,10 +2074,14 @@ public partial class LoadTestDashboard : Form
                 RPM = company.rpm
                     .Where(r => _config.workers.Any(w => w.enabled && w.type == r.Key))
                     .Sum(r => r.Value),
+
                 Requests = 0,
                 Errors = 0,
                 AvgMs = 0,
-                MaxMs = 0
+                MaxMs = 0,
+
+                // 🔥 DAS FEHLTE!
+                HistoryAvgMs = histAvg
             });
 
             // 🔹 Worker-Zeilen
@@ -1952,12 +2109,12 @@ public partial class LoadTestDashboard : Form
                     Worker = worker.type,
                     DisplayWorker = displayWorker,
                     IsGroup = false,
-
                     RPM = rpm,
                     Requests = 0,
                     Errors = 0,
                     AvgMs = 0,
-                    MaxMs = 0
+                    MaxMs = 0,
+                    HistoryAvgMs = GetHistoricalAvgMs(company.name, worker.type)
                 });
             }
         }
@@ -2381,5 +2538,164 @@ public partial class LoadTestDashboard : Form
             return false;
         }
     }
+
+    private int ResolveConcurrency(WorkerConfig worker)
+    {
+        // 🔥 1. Worker Override
+        if (worker.maxConcurrency.HasValue && worker.maxConcurrency.Value > 0)
+            return worker.maxConcurrency.Value;
+
+        // 🔥 2. Global Default
+        if (_config.maxConcurrencyPerWorker > 0)
+            return _config.maxConcurrencyPerWorker;
+
+        // 🔥 3. Hard fallback (failsafe)
+        return 20;
+    }
+
+    private double GetHistoricalAvgMs(string company, string worker)
+    {
+        if (_config?.avgResponseTimesMs == null)
+            return 100; // fallback
+
+        var key = $"{company}|{worker}";
+
+        if (_config.avgResponseTimesMs.TryGetValue(key, out var val))
+            return Math.Round(val, 0);
+
+        return 100; // fallback
+    }
+
+    private double CalculateCompanyHistoryAvg(
+   string company,
+   IEnumerable<(string Worker, string Company, long Rpm, long Requests, long Errors, double Rps, int PoolSize, double AvgMs, long MaxMs)> workers)
+    {
+        if (_config?.avgResponseTimesMs == null)
+            return 100;
+
+        var values = new List<double>();
+
+        foreach (var w in workers)
+        {
+            var key = $"{company}|{w.Worker}";
+
+            if (_config.avgResponseTimesMs.TryGetValue(key, out var val))
+            {
+                values.Add(val);
+            }
+        }
+
+        if (values.Count == 0)
+            return 100;
+
+        double totalWeight = 0;
+        double weighted = 0;
+
+        foreach (var w in workers)
+        {
+            var key = $"{company}|{w.Worker}";
+
+            if (_config.avgResponseTimesMs.TryGetValue(key, out var val))
+            {
+                weighted += val * w.Rpm;
+                totalWeight += w.Rpm;
+            }
+        }
+
+        return totalWeight > 0 ? weighted / totalWeight : 100;
+    }
+
+    private void AdjustConcurrency()
+    {
+        if (_config == null || _cachedStats.Count == 0)
+            return;
+
+        foreach (var stat in _cachedStats)
+        {
+            if (stat.Rpm <= 0)
+                continue;
+
+            int totalRpm = GetConfiguredWorkerRpm(stat.Company, stat.Worker);
+
+            int newConcurrency = CalculateDynamicConcurrency(
+                stat.Company,
+                stat.Worker,
+                totalRpm,
+                stat.AvgMs
+            );
+
+            var key = (stat.Company, stat.Worker);
+
+            // 🔥 Minimum für relevante Last (verhindert "alles = 1")
+            if (totalRpm > 50 && newConcurrency < 2)
+                newConcurrency = 2;
+
+            // 🔥 SMOOTHING
+            if (_dynamicConcurrency.TryGetValue(key, out var current))
+            {
+                newConcurrency = (int)(current * 0.7 + newConcurrency * 0.3);
+            }
+
+            _dynamicConcurrency[key] = Math.Max(1, newConcurrency);
+        }
+
+        // =========================
+        // 🔥 GLOBAL LIMIT (NAV SCHUTZ!)
+        // =========================
+        int maxTotal = _config.maxTotalConcurrency > 0
+            ? _config.maxTotalConcurrency
+            : 20; // fallback
+
+        int totalConcurrency = _dynamicConcurrency.Values.Sum();
+
+        if (totalConcurrency > maxTotal)
+        {
+            double factor = (double)maxTotal / totalConcurrency;
+
+            var keys = _dynamicConcurrency.Keys.ToList();
+
+            foreach (var key in keys)
+            {
+                _dynamicConcurrency[key] =
+                    Math.Max(1, (int)(_dynamicConcurrency[key] * factor));
+            }
+        }
+    }
+
+    private int CalculateDynamicConcurrency(
+        string company,
+        string worker,
+        long rpm,
+        double avgMs
+    )
+    {
+        if (rpm <= 0)
+            return 1;
+
+        double rps = rpm / 60.0;
+        double responseTimeSec = Math.Max(avgMs, 50) / 1000.0;
+
+        // 🔥 Little’s Law
+        double required = rps * responseTimeSec;
+
+        // 🔥 Sicherheits-Puffer (SEHR wichtig!)
+        required *= 1.2;
+
+        int target = (int)Math.Ceiling(required);
+
+        target = Math.Clamp(target, 1, _config.maxConcurrencyPerWorker);
+
+        return target;
+    }
+
+    private int GetConfiguredWorkerRpm(string company, string worker)
+    {
+        var comp = _config.companies.FirstOrDefault(c => c.name == company);
+        if (comp == null)
+            return 0;
+
+        return comp.rpm.GetValueOrDefault(worker, 0);
+    }
+
 
 }

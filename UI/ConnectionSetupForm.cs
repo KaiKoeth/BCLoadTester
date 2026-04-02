@@ -19,14 +19,15 @@ public class ConnectionSetupForm : Form
     private TextBox txtDatabase;
     private TextBox txtLoadTestTable;
 
-    // 🔥 NEW
     private TextBox txtRpmPerWorker;
     private TextBox txtMaxWorkersPerType;
     private TextBox txtMaxConnectionsPerServer;
 
-    // 🔥 ToolTip (persisted)
+    private TextBox txtMaxConcurrencyPerWorker;
+
     private ToolTip _toolTip;
     private Label lblRpm;
+    private Label lblConcurrency;
 
     private bool _isDirty = false;
 
@@ -36,7 +37,7 @@ public class ConnectionSetupForm : Form
 
         Text = "Connection Setup";
         Width = 600;
-        Height = 450;
+        Height = 480;
         StartPosition = FormStartPosition.CenterParent;
 
         this.FormClosing += ConnectionSetupForm_FormClosing;
@@ -48,7 +49,6 @@ public class ConnectionSetupForm : Form
             Padding = new Padding(10)
         };
 
-        // 🔥 ToolTip setup
         _toolTip = new ToolTip
         {
             IsBalloon = true,
@@ -57,10 +57,13 @@ public class ConnectionSetupForm : Form
             ReshowDelay = 100
         };
 
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
+        // 🔥 Tooltip auf gesamtes Fenster
+        _toolTip.SetToolTip(this, GetGeneralFlowTooltip());
+
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        for (int i = 0; i < 11; i++)
+        for (int i = 0; i < 12; i++)
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
 
         txtServiceRoot = new TextBox { Text = _config.serviceRoot, Dock = DockStyle.Fill };
@@ -73,10 +76,15 @@ public class ConnectionSetupForm : Form
         txtDatabase = new TextBox { Text = _config.database, Dock = DockStyle.Fill };
         txtLoadTestTable = new TextBox { Text = _config.loadTestTableName, Dock = DockStyle.Fill };
 
-        // 🔥 NEW FIELDS (with defaults)
         txtRpmPerWorker = new TextBox
         {
             Text = (_config.rpmPerWorker == 0 ? 150 : _config.rpmPerWorker).ToString(),
+            Dock = DockStyle.Fill
+        };
+
+        txtMaxConcurrencyPerWorker = new TextBox
+        {
+            Text = (_config.maxConcurrencyPerWorker == 0 ? 20 : _config.maxConcurrencyPerWorker).ToString(),
             Dock = DockStyle.Fill
         };
 
@@ -104,10 +112,17 @@ public class ConnectionSetupForm : Form
 
         txtMaxWorkersPerType.TextChanged += (s, e) => MarkDirty();
         txtMaxConnectionsPerServer.TextChanged += (s, e) => MarkDirty();
+
         txtRpmPerWorker.TextChanged += (s, e) =>
         {
             MarkDirty();
             UpdateRpmTooltip();
+        };
+
+        txtMaxConcurrencyPerWorker.TextChanged += (s, e) =>
+        {
+            MarkDirty();
+            UpdateConcurrencyTooltip();
         };
 
         int row = 0;
@@ -136,25 +151,29 @@ public class ConnectionSetupForm : Form
         layout.Controls.Add(new Label { Text = "LoadTest Table" }, 0, row);
         layout.Controls.Add(txtLoadTestTable, 1, row++);
 
-        // 🔥 NEW SETTINGS UI (with label tooltips too)
+        // 🔥 RPM
         lblRpm = new Label { Text = "RPM per Worker" };
         layout.Controls.Add(lblRpm, 0, row);
-        layout.Controls.Add(txtRpmPerWorker, 1, row);
-        row++;
+        layout.Controls.Add(txtRpmPerWorker, 1, row++);
 
+        // 🔥 Concurrency
+        lblConcurrency = new Label { Text = "Max Concurrency per Worker" };
+        layout.Controls.Add(lblConcurrency, 0, row);
+        layout.Controls.Add(txtMaxConcurrencyPerWorker, 1, row++);
+
+        // 🔥 Worker
         var lblWorkers = new Label { Text = "Max Workers per Type" };
         layout.Controls.Add(lblWorkers, 0, row);
-        layout.Controls.Add(txtMaxWorkersPerType, 1, row);
-        _toolTip.SetToolTip(lblWorkers, "Maximale parallele Worker pro Typ (Lastverteilung)");
-        _toolTip.SetToolTip(txtMaxWorkersPerType, "Maximale parallele Worker pro Typ (Lastverteilung)");
-        row++;
+        layout.Controls.Add(txtMaxWorkersPerType, 1, row++);
+        _toolTip.SetToolTip(lblWorkers, GetWorkersTooltip());
+        _toolTip.SetToolTip(txtMaxWorkersPerType, GetWorkersTooltip());
 
+        // 🔥 Connections
         var lblConn = new Label { Text = "Max Connections per Server" };
         layout.Controls.Add(lblConn, 0, row);
-        layout.Controls.Add(txtMaxConnectionsPerServer, 1, row);
-        _toolTip.SetToolTip(lblConn, "Max. gleichzeitige HTTP-Verbindungen (Client-Limit)");
-        _toolTip.SetToolTip(txtMaxConnectionsPerServer, "Max. gleichzeitige HTTP-Verbindungen (Client-Limit)");
-        row++;
+        layout.Controls.Add(txtMaxConnectionsPerServer, 1, row++);
+        _toolTip.SetToolTip(lblConn, GetConnectionsTooltip());
+        _toolTip.SetToolTip(txtMaxConnectionsPerServer, GetConnectionsTooltip());
 
         var buttonPanel = new FlowLayoutPanel
         {
@@ -177,7 +196,7 @@ public class ConnectionSetupForm : Form
         Controls.Add(buttonPanel);
 
         UpdateRpmTooltip();
-
+        UpdateConcurrencyTooltip();
     }
 
     void MarkDirty()
@@ -217,8 +236,8 @@ public class ConnectionSetupForm : Form
         _config.database = txtDatabase.Text;
         _config.loadTestTableName = txtLoadTestTable.Text;
 
-        // 🔥 NEW SAVE
         _config.rpmPerWorker = int.Parse(txtRpmPerWorker.Text);
+        _config.maxConcurrencyPerWorker = int.Parse(txtMaxConcurrencyPerWorker.Text);
         _config.maxWorkersPerType = int.Parse(txtMaxWorkersPerType.Text);
         _config.maxConnectionsPerServer = int.Parse(txtMaxConnectionsPerServer.Text);
 
@@ -282,18 +301,65 @@ public class ConnectionSetupForm : Form
     {
         if (int.TryParse(txtRpmPerWorker.Text, out int rpm))
         {
-            var rps = rpm / 60.0;
-
-            var text = $"Requests pro Worker pro Minute\n" +
-                       $"Aktuell: {rpm} RPM ≈ {rps:F2} req/sec";
-
+            var text = GetRpmBaseTooltip(rpm);
             _toolTip.SetToolTip(txtRpmPerWorker, text);
-            _toolTip.SetToolTip(lblRpm, text);   // 🔥 DAS ist neu
+            _toolTip.SetToolTip(lblRpm, text);
         }
-        else
+    }
+
+    private void UpdateConcurrencyTooltip()
+    {
+        if (int.TryParse(txtMaxConcurrencyPerWorker.Text, out int c))
         {
-            _toolTip.SetToolTip(txtRpmPerWorker, "Ungültiger Wert");
-            _toolTip.SetToolTip(lblRpm, "Ungültiger Wert");
+            var text = GetConcurrencyBaseTooltip(c);
+            _toolTip.SetToolTip(txtMaxConcurrencyPerWorker, text);
+            _toolTip.SetToolTip(lblConcurrency, text);
         }
+    }
+
+    // 🔥 TOOLTIP HELPERS
+    private string GetRpmBaseTooltip(int rpm)
+    {
+        var rps = rpm / 60.0;
+
+        return
+            $"Requests pro Worker pro Minute\n" +
+            $"Aktuell: {rpm} RPM ≈ {rps:F2} req/sec\n\n" +
+            "Bestimmt wie oft Requests gestartet werden.\n\n" +
+            "Wenn Requests lange dauern, wird dieser Wert nicht erreicht.";
+    }
+
+    private string GetConcurrencyBaseTooltip(int c)
+    {
+        return
+            $"Maximale parallele Requests\n\n" +
+            $"Aktuell: {c}\n\n" +
+            "Begrenzt gleichzeitige Requests.\n\n" +
+            "Zu hoch = Überlast\n" +
+            "Zu niedrig = zu wenig Last";
+    }
+
+    private string GetWorkersTooltip()
+    {
+        return
+            "Max Worker pro Typ\n\n" +
+            "Skaliert Last über mehrere Worker.";
+    }
+
+    private string GetConnectionsTooltip()
+    {
+        return
+            "Max HTTP-Verbindungen\n\n" +
+            "Zu niedrig = künstlicher Flaschenhals";
+    }
+
+    private string GetGeneralFlowTooltip()
+    {
+        return
+            "System-Logik:\n\n" +
+            "RPM → Frequenz\n" +
+            "Concurrency → Parallelität\n" +
+            "Worker → Skalierung\n" +
+            "Connections → Limit";
     }
 }
