@@ -11,18 +11,29 @@ public static class LoadtestStatsLoader
         var result = new Dictionary<string, double>();
         success = false;
 
+        var connectionString = config.BuildConnectionString();
+
+        // =========================
+        // 🔥 PRE-CHECK
+        // =========================
+        if (!CanConnect(connectionString))
+        {
+            success = false;
+            return result; // 🔥 SOFORT ABBRUCH
+        }
+
         try
         {
-            using var conn = new SqlConnection(config.BuildConnectionString());
+            using var conn = new SqlConnection(connectionString);
             conn.Open();
 
             var cmd = conn.CreateCommand();
 
             cmd.CommandText = $@"
-            SELECT Company, Worker, AVG(AvgMs) as AvgMs
-            FROM [{config.loadTestTableName}] (NOLOCK)
-            WHERE AvgMs IS NOT NULL
-            GROUP BY Company, Worker
+        SELECT Company, Worker, AVG(AvgMs) as AvgMs
+        FROM [{config.loadTestTableName}] (NOLOCK)
+        WHERE AvgMs IS NOT NULL
+        GROUP BY Company, Worker
         ";
 
             using var reader = cmd.ExecuteReader();
@@ -43,7 +54,7 @@ public static class LoadtestStatsLoader
                 result[key] = avgMs;
             }
 
-            success = true; // 🔥 Erfolg setzen
+            success = true;
         }
         catch
         {
@@ -51,5 +62,18 @@ public static class LoadtestStatsLoader
         }
 
         return result;
+    }
+    private static bool CanConnect(string connectionString)
+    {
+        try
+        {
+            using var conn = new SqlConnection(connectionString + ";Connection Timeout=3;");
+            conn.Open();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

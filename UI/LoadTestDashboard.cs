@@ -518,15 +518,15 @@ public partial class LoadTestDashboard : Form
                 return string.Compare(a.Worker, b.Worker, StringComparison.Ordinal);
             });
 
+            AdjustConcurrency();
             if (_cachedStats.Count > 0)
             {
                 BuildRows(_cachedStats);
             }
             RefreshGrid(runtime);
-
             UpdatePoolWarnings();
 
-            AdjustConcurrency();
+
         };
         InitializeApp();
         timer.Start();
@@ -539,6 +539,17 @@ public partial class LoadTestDashboard : Form
         {
             MessageBox.Show("Test duration changed. Please reload data.");
             return;
+        }
+
+        if (_client == null)
+        {
+            _client = new HttpClient(new SocketsHttpHandler
+            {
+                MaxConnectionsPerServer = _config.maxConnectionsPerServer,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+                EnableMultipleHttp2Connections = true
+            });
         }
 
         if (_config == null ||
@@ -654,11 +665,11 @@ public partial class LoadTestDashboard : Form
 
                 // 🔥 WICHTIG: Parallelisierung wieder rein
                 int parallelWorkers = Math.Clamp(
-                    rpm / _config.rpmPerWorker,
+                    (int)Math.Ceiling((double)rpm / _config.rpmPerWorker),
                     1,
                     _config.maxWorkersPerType);
 
-                int workerRpm = Math.Max(1, rpm / parallelWorkers);
+                int workerRpm = (int)Math.Ceiling((double)rpm / parallelWorkers);
                 string workerKey = worker.type;
                 _workerCounts[(company.name, workerKey)] = parallelWorkers;
                 string workerDisplayName = $"{worker.type} (x{parallelWorkers})";
@@ -922,6 +933,11 @@ public partial class LoadTestDashboard : Form
                 lblStatus.Text = "Historische Durchschnittswerte geladen";
                 lblStatus.ForeColor = Color.DarkGreen;
             }
+            if (!loaded)
+            {
+                lblStatus.Text = "SQL connection failed (LoadtestStats)";
+                lblStatus.ForeColor = Color.Red;
+            }
         }
         catch (Exception ex)
         {
@@ -933,6 +949,33 @@ public partial class LoadTestDashboard : Form
     {
         if (_config == null)
             return;
+
+        // =========================
+        // 🔥 HISTORIE NACHLADEN (FALLBACK)
+        // =========================
+        if (_config.avgResponseTimesMs == null || _config.avgResponseTimesMs.Count == 0)
+        {
+            lblStatus.Text = "Loading historical response times...";
+            lblStatus.ForeColor = Color.DarkOrange;
+            Application.DoEvents();
+
+            bool loaded;
+
+            var history = LoadtestStatsLoader.LoadAvgResponseTimes(_config, out loaded);
+
+            if (loaded && history.Count > 0)
+            {
+                _config.avgResponseTimesMs = history;
+
+                lblStatus.Text = "Historical response times loaded";
+                lblStatus.ForeColor = Color.DarkGreen;
+            }
+            else
+            {
+                lblStatus.Text = "No historical data available (or SQL failed)";
+                lblStatus.ForeColor = Color.Gray;
+            }
+        }
 
         int durationMinutes = (int)numTestDuration.Value;
 
@@ -1197,11 +1240,13 @@ public partial class LoadTestDashboard : Form
 
                 // 👉 NEU (wenn du Feld ergänzt hast)
                 HistoryAvgMs = histAvg
+
             });
 
             // 🔹 Worker-Zeilen
             foreach (var w in companyGroup)
             {
+
                 string displayWorker = w.Worker;
 
                 // ✅ WICHTIG: (xN) aus Cache holen (NICHT aus String!)
@@ -1221,8 +1266,9 @@ public partial class LoadTestDashboard : Form
                 if (w.Worker == "WebOrderCreate")
                 {
                     var bigOrders = _stats.GetCustomMetric(w.Worker, companyName, "BigOrders");
-                    displayWorker += $" [{bigOrders}]";
 
+                    if (bigOrders > 0)
+                        displayWorker += $" | BO: {bigOrders}";
                 }
 
                 _allRows.Add(new DashboardRow
@@ -1232,11 +1278,7 @@ public partial class LoadTestDashboard : Form
                     DisplayWorker = displayWorker,
                     IsGroup = false,
 
-                    RPM = w.Rpm * (
-                         _workerCounts.TryGetValue((companyName, w.Worker), out count)
-                             ? count
-                             : 1
-                     ),
+                    RPM = GetConfiguredWorkerRpm(companyName, w.Worker),
 
                     Requests = w.Requests,
                     Errors = w.Errors,
@@ -2067,7 +2109,6 @@ public partial class LoadTestDashboard : Form
                     Worker = worker.type,
                     DisplayWorker = displayWorker,
                     IsGroup = false,
-
                     RPM = rpm,
                     Requests = 0,
                     Errors = 0,
@@ -2574,22 +2615,50 @@ public partial class LoadTestDashboard : Form
             if (stat.Rpm <= 0)
                 continue;
 
+            int totalRpm = GetConfiguredWorkerRpm(stat.Company, stat.Worker);
+
             int newConcurrency = CalculateDynamicConcurrency(
                 stat.Company,
                 stat.Worker,
-                stat.Rpm,
+                totalRpm,
                 stat.AvgMs
             );
 
             var key = (stat.Company, stat.Worker);
 
-            // 🔥 SMOOTHING (wichtig!)
+            // 🔥 Minimum für relevante Last (verhindert "alles = 1")
+            if (totalRpm > 50 && newConcurrency < 2)
+                newConcurrency = 2;
+
+            // 🔥 SMOOTHING
             if (_dynamicConcurrency.TryGetValue(key, out var current))
             {
                 newConcurrency = (int)(current * 0.7 + newConcurrency * 0.3);
             }
 
             _dynamicConcurrency[key] = Math.Max(1, newConcurrency);
+        }
+
+        // =========================
+        // 🔥 GLOBAL LIMIT (NAV SCHUTZ!)
+        // =========================
+        int maxTotal = _config.maxTotalConcurrency > 0
+            ? _config.maxTotalConcurrency
+            : 20; // fallback
+
+        int totalConcurrency = _dynamicConcurrency.Values.Sum();
+
+        if (totalConcurrency > maxTotal)
+        {
+            double factor = (double)maxTotal / totalConcurrency;
+
+            var keys = _dynamicConcurrency.Keys.ToList();
+
+            foreach (var key in keys)
+            {
+                _dynamicConcurrency[key] =
+                    Math.Max(1, (int)(_dynamicConcurrency[key] * factor));
+            }
         }
     }
 
@@ -2604,7 +2673,7 @@ public partial class LoadTestDashboard : Form
             return 1;
 
         double rps = rpm / 60.0;
-        double responseTimeSec = avgMs / 1000.0;
+        double responseTimeSec = Math.Max(avgMs, 50) / 1000.0;
 
         // 🔥 Little’s Law
         double required = rps * responseTimeSec;
@@ -2614,10 +2683,18 @@ public partial class LoadTestDashboard : Form
 
         int target = (int)Math.Ceiling(required);
 
-        // 🔥 Limits
-        target = Math.Clamp(target, 1, _config.maxConcurrencyPerWorker * 2);
+        target = Math.Clamp(target, 1, _config.maxConcurrencyPerWorker);
 
         return target;
+    }
+
+    private int GetConfiguredWorkerRpm(string company, string worker)
+    {
+        var comp = _config.companies.FirstOrDefault(c => c.name == company);
+        if (comp == null)
+            return 0;
+
+        return comp.rpm.GetValueOrDefault(worker, 0);
     }
 
 

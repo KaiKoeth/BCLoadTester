@@ -23,6 +23,7 @@ public class AppConfig
     public List<Company> companies { get; set; } = new();
 
     public string loadTestTableName { get; set; } = "BC Loadtest Protocol";
+    public int maxTotalConcurrency { get; set; } = 20;
 
     public string BuildConnectionString()
     {
