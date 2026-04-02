@@ -1,5 +1,6 @@
 namespace BCLoadtester.Loadtest;
 
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 
@@ -18,8 +19,8 @@ public class WebOrderCreateWorker : BaseWorker
     private readonly string _promotionMediumTrgGrpNo;
     private readonly decimal _shippingChargeAmount;
 
-    // 🔥 Lock-freie Steuerung
-    private long _lastBigOrderTicks;
+    // 🔥 FIX: shared per company
+    private static readonly ConcurrentDictionary<string, long> _lastBigOrderTicksPerCompany = new();
 
     private static int _counter = 0;
 
@@ -35,7 +36,7 @@ public class WebOrderCreateWorker : BaseWorker
         int rpm,
         Statistics stats,
         string workerName,
-         Func<int> getConcurrency,
+        Func<int> getConcurrency,
         int bigOrderLines = 0,
         int bigOrderIntervalMinutes = 0,
         string? promotionMediumNo = null,
@@ -59,15 +60,10 @@ public class WebOrderCreateWorker : BaseWorker
 
         var now = DateTime.UtcNow;
 
+        // 🔥 initialisieren (nur einmal pro Company)
         if (_bigOrderIntervalMinutes > 0)
         {
-            var offsetSeconds = Random.Shared.Next(0, _bigOrderIntervalMinutes * 60);
-            var start = now - TimeSpan.FromSeconds(offsetSeconds);
-            _lastBigOrderTicks = start.Ticks;
-        }
-        else
-        {
-            _lastBigOrderTicks = now.Ticks;
+            _lastBigOrderTicksPerCompany.TryAdd(_company, now.Ticks);
         }
     }
 
@@ -77,19 +73,22 @@ public class WebOrderCreateWorker : BaseWorker
         string json;
 
         // =========================
-        // 🔥 BIG ORDER (LOCK-FREE)
+        // 🔥 BIG ORDER (FIXED)
         // =========================
         bool createBigOrder = false;
 
         if (_bigOrderLines > 0 && _bigOrderIntervalMinutes > 0)
         {
-            var last = new DateTime(Interlocked.Read(ref _lastBigOrderTicks));
+            var lastTicks = _lastBigOrderTicksPerCompany.GetOrAdd(_company, now.Ticks);
+            var last = new DateTime(lastTicks);
 
             if ((now - last).TotalMinutes >= _bigOrderIntervalMinutes)
             {
-                if (Interlocked.Exchange(ref _lastBigOrderTicks, now.Ticks) != last.Ticks)
+                if (_lastBigOrderTicksPerCompany.TryUpdate(_company, now.Ticks, lastTicks))
                 {
                     createBigOrder = true;
+
+                    Console.WriteLine($"🔥 BIG ORDER TRIGGERED [{_company}] {now:HH:mm:ss}");
                 }
             }
         }

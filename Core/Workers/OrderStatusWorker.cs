@@ -33,11 +33,8 @@ public class OrderStatusWorker : BaseWorker
 
         string? customerNo;
 
-        // 🔥 Hybrid Verhalten bleibt
-        if (_rnd.Value!.Next(100) < 10)
-            customerNo = _pool.TakeRandom();
-        else
-            customerNo = _pool.GetRandom();
+
+        customerNo = _pool.GetRandom();
 
         // 🔥 Pool leer → echter Fehler (BLEIBT Exception!)
         if (customerNo == null)

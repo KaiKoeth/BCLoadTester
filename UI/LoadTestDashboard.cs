@@ -524,7 +524,7 @@ public partial class LoadTestDashboard : Form
                 BuildRows(_cachedStats);
             }
             RefreshGrid(runtime);
-            UpdatePoolWarnings();
+            //UpdatePoolWarnings();
 
 
         };
@@ -1255,17 +1255,20 @@ public partial class LoadTestDashboard : Form
                     displayWorker += $" (x{count})";
                 }
 
+                var workerKey = NormalizeWorkerName(w.Worker);
+
+
                 // ✅ Pool anzeigen (bestehendes Verhalten bleibt)
                 // 🔥 Pool anzeigen (bestehendes Verhalten beibehalten)
-                if ((w.Worker == "OrderStatus" || w.Worker == "WebOrderCreate") && w.PoolSize > 0)
+                if ((workerKey == "OrderStatus" || workerKey == "WebOrderCreate") && w.PoolSize > 0)
                 {
                     displayWorker += $" ({w.PoolSize})";
                 }
 
                 // 🔥 NEU: BigOrders anzeigen (nur für WebOrder)
-                if (w.Worker == "WebOrderCreate")
+                if (workerKey == "WebOrderCreate")
                 {
-                    var bigOrders = _stats.GetCustomMetric(w.Worker, companyName, "BigOrders");
+                    var bigOrders = _stats.GetCustomMetric(workerKey, companyName, "BigOrders");
 
                     if (bigOrders > 0)
                         displayWorker += $" | BO: {bigOrders}";
@@ -1886,8 +1889,8 @@ public partial class LoadTestDashboard : Form
                 [RPM] BIGINT,
                 [Requests] BIGINT,
                 [Errors] BIGINT,
-                [RPS] FLOAT,
-                [AvgMs] FLOAT,
+                [RPS] DECIMAL(10,4),
+                [AvgMs] DECIMAL(10,4),
                 [MaxMs] BIGINT,
                 [PoolSize] INT,
                 [BigOrders] BIGINT
@@ -1902,10 +1905,14 @@ public partial class LoadTestDashboard : Form
             var stats = _stats.GetStats().ToList();
 
             int inserted = 0;
+            var runtime = (_stopTime ?? DateTime.Now) - (_startTime ?? DateTime.Now);
+            var totalSeconds = Math.Max(runtime.TotalSeconds, 1);
 
             foreach (var s in stats)
             {
                 var cmd = conn.CreateCommand();
+                var rps = (double)s.Requests / totalSeconds;
+
                 cmd.CommandText = $@"
         INSERT INTO [{tableName}]
         ([Testprofile No_],[Run No_],[Timestamp],[StartTime],[StopTime],[Company],[Worker],[RPM],[Requests],[Errors],[RPS],[AvgMs],[MaxMs],[PoolSize],[BigOrders])
@@ -1923,7 +1930,7 @@ public partial class LoadTestDashboard : Form
                 cmd.Parameters.AddWithValue("@rpm", s.Rpm);
                 cmd.Parameters.AddWithValue("@req", s.Requests);
                 cmd.Parameters.AddWithValue("@err", s.Errors);
-                cmd.Parameters.AddWithValue("@rps", s.Rps);
+                cmd.Parameters.AddWithValue("@rps", rps);
                 cmd.Parameters.AddWithValue("@avg", s.AvgMs);
                 cmd.Parameters.AddWithValue("@max", s.MaxMs);
                 cmd.Parameters.AddWithValue("@pool", s.PoolSize);
