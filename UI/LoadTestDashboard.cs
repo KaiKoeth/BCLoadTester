@@ -101,7 +101,7 @@ public partial class LoadTestDashboard : Form
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            RowCount = 5,
+            RowCount = 6,
             ColumnCount = 1
         };
 
@@ -514,65 +514,15 @@ public partial class LoadTestDashboard : Form
 
 
         };
-        InitializeApp();
+        _ = InitializeApp();
         timer.Start();
     }
 
     private async void btnStart_Click(object sender, EventArgs e)
     {
-
-        if (_loadedDurationMinutes != (int)numTestDuration.Value)
+        bool flowControl = await PrepareAndValidateRunAsynch();
+        if (!flowControl)
         {
-            MessageBox.Show("Test duration changed. Please reload data.");
-            return;
-        }
-
-        if (_client == null)
-        {
-            _client = new HttpClient(new SocketsHttpHandler
-            {
-                MaxConnectionsPerServer = _config.maxConnectionsPerServer,
-                PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
-                EnableMultipleHttp2Connections = true
-            });
-        }
-
-        if (_config == null ||
-            (_customerPools.Count == 0 &&
-            _invoiceCustomerNoCache.Count == 0 &&
-            _creditMemoCustomerNoCache.Count == 0 &&
-            _orderStatusCache.Count == 0 &&
-            _webOrderPoolCache.Count == 0))
-        {
-            MessageBox.Show("Please load data first.");
-            return;
-        }
-
-        // 🔥 Pre-Check
-        lblStatus.Text = "Testing connections...";
-        lblStatus.ForeColor = Color.DarkOrange;
-
-        if (!await TestSqlConnectionAsync())
-        {
-            lblStatus.Text = "SQL connection failed";
-            lblStatus.ForeColor = Color.Red;
-            return;
-        }
-
-        if (!await TestApiConnectionAsync())
-        {
-            lblStatus.Text = "API connection failed";
-            lblStatus.ForeColor = Color.Red;
-            return;
-        }
-        SetUiState(true);
-
-        // 🔥 NEU: Protokoll prüfen / löschen
-        if (!await CheckAndCleanupProtocolTableOnStartAsync())
-        {
-            lblStatus.Text = "Start cancelled";
-            lblStatus.ForeColor = Color.Gray;
             return;
         }
 
@@ -634,6 +584,60 @@ public partial class LoadTestDashboard : Form
         lblStatus.Text = "Test running";
     }
 
+    private async Task<bool> PrepareAndValidateRunAsynch()
+    {
+        if (_loadedDurationMinutes != (int)numTestDuration.Value)
+        {
+            MessageBox.Show("Test duration changed. Please reload data.");
+            return false;
+        }
+
+        if (_client == null)
+        {
+            _client ??= CreateHttpClient();
+        }
+
+        if (_config == null ||
+            (_customerPools.Count == 0 &&
+            _invoiceCustomerNoCache.Count == 0 &&
+            _creditMemoCustomerNoCache.Count == 0 &&
+            _orderStatusCache.Count == 0 &&
+            _webOrderPoolCache.Count == 0))
+        {
+            MessageBox.Show("Please load data first.");
+            return false;
+        }
+
+        // 🔥 Pre-Check
+        lblStatus.Text = "Testing connections...";
+        lblStatus.ForeColor = Color.DarkOrange;
+
+        if (!await TestSqlConnectionAsync())
+        {
+            lblStatus.Text = "SQL connection failed";
+            lblStatus.ForeColor = Color.Red;
+            return false;
+        }
+
+        if (!await TestApiConnectionAsync())
+        {
+            lblStatus.Text = "API connection failed";
+            lblStatus.ForeColor = Color.Red;
+            return false;
+        }
+        SetUiState(true);
+
+        // 🔥 NEU: Protokoll prüfen / löschen
+        if (!await CheckAndCleanupProtocolTableOnStartAsync())
+        {
+            lblStatus.Text = "Start cancelled";
+            lblStatus.ForeColor = Color.Gray;
+            return false;
+        }
+
+        return true;
+    }
+
     private async void btnStop_Click(object sender, EventArgs e)
     {
         try
@@ -688,7 +692,7 @@ public partial class LoadTestDashboard : Form
         }
     }
 
-    private async void InitializeApp()
+    private async Task InitializeApp()
     {
         try
         {
@@ -1422,13 +1426,7 @@ public partial class LoadTestDashboard : Form
             _config = ConfigLoader.Load();
 
             // 🔥 HttpClient neu erstellen (EXTREM wichtig!)
-            _client = new HttpClient(new SocketsHttpHandler
-            {
-                MaxConnectionsPerServer = _config.maxConnectionsPerServer,
-                PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
-                EnableMultipleHttp2Connections = true
-            });
+            _client ??= CreateHttpClient();
 
             // 🔥 Caches leeren (DB / Port könnte sich geändert haben!)
             _customerPools.Clear();
@@ -2486,6 +2484,17 @@ public partial class LoadTestDashboard : Form
             return 0;
 
         return comp.rpm.GetValueOrDefault(worker, 0);
+    }
+
+    private HttpClient CreateHttpClient()
+    {
+        return new HttpClient(new SocketsHttpHandler
+        {
+            MaxConnectionsPerServer = _config.maxConnectionsPerServer,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            EnableMultipleHttp2Connections = true
+        });
     }
 
 
