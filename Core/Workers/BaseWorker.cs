@@ -6,7 +6,7 @@ using System.Net.Http;
 public abstract class BaseWorker : IWorker
 {
     protected readonly HttpClient _client;
-    protected readonly Statistics _stats;
+    protected readonly StatisticsService _stats; // ✅ geändert
     protected readonly string _workerName;
     protected readonly string _company;
 
@@ -14,12 +14,12 @@ public abstract class BaseWorker : IWorker
     private readonly double _intervalMs;
     private readonly SemaphoreSlim _semaphore;
     private readonly Func<int> _getConcurrency;
-    private const int MaxSemaphore = 500; // 🔥 globales Limit
+    private const int MaxSemaphore = 500;
     private int _currentTarget = 1;
 
     protected BaseWorker(
         HttpClient client,
-        Statistics stats,
+        StatisticsService stats, // ✅ geändert
         string workerName,
         string company,
         int rpm,
@@ -34,10 +34,8 @@ public abstract class BaseWorker : IWorker
         _rpm = Math.Max(1, rpm);
         _intervalMs = 60000.0 / _rpm;
 
-        // 🔥 Safety (wichtig!)
         _getConcurrency = getConcurrency;
 
-        // 🔥 Semaphore groß machen → wir steuern selbst
         _semaphore = new SemaphoreSlim(MaxSemaphore);
     }
 
@@ -51,7 +49,7 @@ public abstract class BaseWorker : IWorker
 
                 int desired = Math.Min(MaxSemaphore, Math.Max(1, _getConcurrency()));
 
-                // 🔥 sanft annähern
+                // 🔥 sanfte Anpassung
                 if (_currentTarget < desired)
                     _currentTarget++;
                 else if (_currentTarget > desired)
@@ -68,7 +66,7 @@ public abstract class BaseWorker : IWorker
                 }
                 else
                 {
-                    await Task.Delay(1, token); // 🔥 wichtig
+                    await Task.Delay(1, token);
                 }
 
                 var elapsed = (DateTime.UtcNow - loopStart).TotalMilliseconds;
@@ -98,7 +96,7 @@ public abstract class BaseWorker : IWorker
         {
             var response = await ExecuteAsync(token);
 
-            _stats.RequestSent(_workerName, _company, 1);
+            _stats.RequestSent(_workerName, _company, 1); // ✅ unverändert nutzbar
 
             if (response != null && !response.IsSuccessStatusCode)
             {
@@ -128,6 +126,5 @@ public abstract class BaseWorker : IWorker
         }
     }
 
-    // 🔥 MUSS implementiert werden!
     protected abstract Task<HttpResponseMessage> ExecuteAsync(CancellationToken token);
 }

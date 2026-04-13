@@ -17,7 +17,7 @@ public partial class LoadTestDashboard : Form
     Button btnLoad;
     Button btnReset;
     Button btnShowData;
-    Statistics _stats = new Statistics();
+    StatisticsService _statisticsService = new StatisticsService();
     DataGridView statsGrid;
     Label lblStartTime;
     Label lblStopTime;
@@ -49,7 +49,6 @@ public partial class LoadTestDashboard : Form
 
     private List<DashboardRow> _allRows = new();
     private List<DashboardRow> _visibleRows = new();
-    private List<(string Worker, string Company, long Rpm, long Requests, long Errors, double Rps, int PoolSize, double AvgMs, long MaxMs)> _cachedStats = new();
 
     private int _remainingMinutes = 0;
     private int _loadedDurationMinutes = 0;
@@ -503,25 +502,12 @@ public partial class LoadTestDashboard : Form
                 lblRemainingTime.Text = "00:00";
             }
 
-            var stats = _stats.GetStats();
+            var stats = _statisticsService.GetSortedStats();
 
-            _cachedStats.Clear();
-            _cachedStats.AddRange(stats);
-
-            // 🔥 schneller als LINQ
-            _cachedStats.Sort(static (a, b) =>
+            AdjustConcurrency(stats);
+            if (stats.Any())
             {
-                int cmp = string.Compare(a.Company, b.Company, StringComparison.Ordinal);
-                if (cmp != 0)
-                    return cmp;
-
-                return string.Compare(a.Worker, b.Worker, StringComparison.Ordinal);
-            });
-
-            AdjustConcurrency();
-            if (_cachedStats.Count > 0)
-            {
-                BuildRows(_cachedStats);
+                BuildRows(stats);
             }
             RefreshGrid(runtime);
             //UpdatePoolWarnings();
@@ -597,7 +583,7 @@ public partial class LoadTestDashboard : Form
         _client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authToken);
 
-        _stats = new Statistics();
+        _statisticsService.ResetStats();
         _startTime = DateTime.Now;
         _endTime = _startTime.Value.AddMinutes(_remainingMinutes);
         _stopTime = null; // 👈 wichtig
@@ -695,7 +681,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerKey, concurrencyFunc));
+                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -709,7 +695,7 @@ public partial class LoadTestDashboard : Form
                                     worker.endpoint,
                                     company.guid, company.name,
                                     workerRpm,
-                                    _stats, workerKey, concurrencyFunc));
+                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -724,7 +710,7 @@ public partial class LoadTestDashboard : Form
                                                                     worker.endpoint,
                                                                     company.guid, company.name,
                                                                     workerRpm,
-                                                                    _stats, workerKey, concurrencyFunc));
+                                                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -739,7 +725,7 @@ public partial class LoadTestDashboard : Form
                                                                     worker.endpoint,
                                                                     company.guid, company.name,
                                                                     workerRpm,
-                                                                    _stats, workerKey, concurrencyFunc));
+                                                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -755,7 +741,7 @@ public partial class LoadTestDashboard : Form
                                                                     worker.endpoint,
                                                                     company.guid, company.name,
                                                                     workerRpm,
-                                                                    _stats, workerKey, concurrencyFunc));
+                                                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -769,7 +755,7 @@ public partial class LoadTestDashboard : Form
                                                                     worker.endpoint,
                                                                     company.guid, company.name,
                                                                     workerRpm,
-                                                                    _stats,
+                                                                    _statisticsService,
                                                                     workerKey,
                                                                     concurrencyFunc,
                                                                     company.webOrderConfig?.bigOrderLines ?? 0,
@@ -792,7 +778,7 @@ public partial class LoadTestDashboard : Form
                                                                     serviceRoot, apiRoot,
                                                                     company.guid, company.name,
                                                                     workerRpm,
-                                                                    _stats, workerKey, concurrencyFunc));
+                                                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -808,7 +794,7 @@ public partial class LoadTestDashboard : Form
                                                                     worker.endpoint,
                                                                     company.guid, company.name,
                                                                     workerRpm,
-                                                                    _stats, workerKey, concurrencyFunc));
+                                                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
 
@@ -823,7 +809,7 @@ public partial class LoadTestDashboard : Form
                                                                     worker.endpoint,
                                                                     company.guid, company.name,
                                                                     workerRpm,
-                                                                    _stats, workerKey, concurrencyFunc));
+                                                                    _statisticsService, workerKey, concurrencyFunc));
                                 break;
                             }
                     }
@@ -1268,7 +1254,7 @@ public partial class LoadTestDashboard : Form
                 // 🔥 NEU: BigOrders anzeigen (nur für WebOrder)
                 if (workerKey == "WebOrderCreate")
                 {
-                    var bigOrders = _stats.GetCustomMetric(workerKey, companyName, "BigOrders");
+                    var bigOrders = _statisticsService.GetCustomMetric(workerKey, companyName, "BigOrders");
 
                     if (bigOrders > 0)
                         displayWorker += $" | BO: {bigOrders}";
@@ -1435,7 +1421,7 @@ public partial class LoadTestDashboard : Form
         if (e.ColumnIndex == 4 && !row.IsGroup)
         {
             var workerKey = NormalizeWorkerName(row.Worker);
-            var errors = _stats.GetErrors(workerKey, row.Company);
+            var errors = _statisticsService.GetErrors(workerKey, row.Company);
 
             if (errors.Count == 0)
             {
@@ -1815,7 +1801,7 @@ public partial class LoadTestDashboard : Form
             double cpu = _cpuCounter.NextValue() / Environment.ProcessorCount;
 
             // 🌐 Netzwerk (optional simpel: Requests/sec als Proxy)
-            var stats = _stats.GetStats();
+            var stats = _statisticsService.GetSortedStats();
             double rps = stats.Sum(s => s.Rps);
 
             // 🔥 Anzeige im Titel
@@ -1902,7 +1888,7 @@ public partial class LoadTestDashboard : Form
             // =========================
             // 🔥 INSERT DATA
             // =========================
-            var stats = _stats.GetStats().ToList();
+            var stats = _statisticsService.GetSortedStats().ToList();
 
             int inserted = 0;
             var runtime = (_stopTime ?? DateTime.Now) - (_startTime ?? DateTime.Now);
@@ -1936,7 +1922,7 @@ public partial class LoadTestDashboard : Form
                 cmd.Parameters.AddWithValue("@pool", s.PoolSize);
 
                 // 🔥 BigOrders aus custom metrics
-                var bigOrders = _stats.GetCustomMetric(s.Worker, s.Company, "BigOrders");
+                var bigOrders = _statisticsService.GetCustomMetric(s.Worker, s.Company, "BigOrders");
                 cmd.Parameters.AddWithValue("@big", bigOrders);
 
                 await cmd.ExecuteNonQueryAsync();
@@ -1972,7 +1958,7 @@ public partial class LoadTestDashboard : Form
         _visibleRows.Clear();
 
         // 🔥 Stats zurücksetzen
-        _stats = new Statistics();
+        _statisticsService.ResetStats();
 
         // 🔥 Zeiten zurücksetzen
         _startTime = null;
@@ -2139,7 +2125,7 @@ public partial class LoadTestDashboard : Form
 
     private void UpdatePoolWarnings()
     {
-        var stats = _stats.GetStats().ToList();
+        var stats = _statisticsService.GetSortedStats().ToList();
 
         // 🔥 alle Worker berücksichtigen (die überhaupt Pool haben)
         var poolStats = stats
@@ -2612,12 +2598,12 @@ public partial class LoadTestDashboard : Form
         return totalWeight > 0 ? weighted / totalWeight : 100;
     }
 
-    private void AdjustConcurrency()
+    private void AdjustConcurrency(IEnumerable<(string Worker, string Company, long Rpm, long Requests, long Errors, double Rps, int PoolSize, double AvgMs, long MaxMs)> stats)
     {
-        if (_config == null || _cachedStats.Count == 0)
+        if (_config == null || !stats.Any())
             return;
 
-        foreach (var stat in _cachedStats)
+        foreach (var stat in stats)
         {
             if (stat.Rpm <= 0)
                 continue;

@@ -19,7 +19,7 @@ public class PhoneticSearchWorker : BaseWorker
         string companyId,
         string companyName,
         int rpm,
-        Statistics stats,
+        StatisticsService stats,
          string workerName, Func<int> getConcurrency)
         : base(client, stats, workerName, companyName, Math.Max(1, rpm), getConcurrency)
     {

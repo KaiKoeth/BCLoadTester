@@ -19,11 +19,13 @@ public class CustomerCreateWorker : BaseWorker
         string companyId,
         string companyName,
         int rpm,
-        Statistics stats,
-        string workerName, Func<int> getConcurrency)
-            : base(client, stats, workerName, companyName, Math.Max(1, rpm), getConcurrency)
+        StatisticsService stats, // ✅ konsistent benannt
+        string workerName,
+        Func<int> getConcurrency
+    )
+        : base(client, stats, workerName, companyName, Math.Max(1, rpm), getConcurrency)
     {
-        _customers = customers;
+        _customers = customers ?? new List<CustomerEntry>(); // 🔥 Null-Safety
 
         _url = $"{serviceRoot}{apiRoot}{endpoint}"
             .Replace("{company}", companyId);
@@ -37,8 +39,10 @@ public class CustomerCreateWorker : BaseWorker
             return new HttpResponseMessage(System.Net.HttpStatusCode.NoContent);
         }
 
-        var NameEntry = _customers[_rnd.Value!.Next(_customers.Count)];
-        var AddrEntry = _customers[_rnd.Value!.Next(_customers.Count)];
+        var rnd = _rnd.Value!; // 🔥 einmal ziehen (ThreadLocal Zugriff reduzieren)
+
+        var nameEntry = _customers[rnd.Next(_customers.Count)];
+        var addrEntry = _customers[rnd.Next(_customers.Count)];
 
         string email = $"loadtest{Guid.NewGuid():N}@test.de";
 
@@ -48,15 +52,15 @@ public class CustomerCreateWorker : BaseWorker
             creditworthinessClass = 0,
             type = "Person",
             salutationCode = "M",
-            displayName = Utils.SafeData.TrimTo(NameEntry.Name, 30),
-            firstName = NameEntry.Firstname,
-            surname = NameEntry.Surname,
-            addressLine1 = AddrEntry.Address,
+            displayName = Utils.SafeData.TrimTo(nameEntry.Name, 30),
+            firstName = nameEntry.Firstname,
+            surname = nameEntry.Surname,
+            addressLine1 = addrEntry.Address,
             addressLine2 = "",
-            street = AddrEntry.Address,
+            street = addrEntry.Address,
             houseNo = "1",
-            postalCode = AddrEntry.PostalCode,
-            city = AddrEntry.City,
+            postalCode = addrEntry.PostalCode,
+            city = addrEntry.City,
             country = "DE",
             phoneNumber = "",
             email = email,
@@ -74,16 +78,17 @@ public class CustomerCreateWorker : BaseWorker
 
         await response.Content.LoadIntoBufferAsync();
 
-        // 🔥 Retry bleibt
+        // 🔥 Retry-Logik unverändert
         if (!response.IsSuccessStatusCode)
         {
-            if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500)
+            int status = (int)response.StatusCode;
+
+            if (status == 429 || status >= 500)
             {
-                await Task.Delay(200 + _rnd.Value!.Next(0, 200), token);
+                await Task.Delay(200 + rnd.Next(0, 200), token);
             }
         }
 
-        // 🔥 GANZ WICHTIG: IMMER zurückgeben!
-        return response;
+        return response; // 🔥 zwingend
     }
 }

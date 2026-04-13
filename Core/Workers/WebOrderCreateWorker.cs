@@ -34,7 +34,7 @@ public class WebOrderCreateWorker : BaseWorker
         string companyId,
         string companyName,
         int rpm,
-        Statistics stats,
+        StatisticsService stats,
         string workerName,
         Func<int> getConcurrency,
         int bigOrderLines = 0,
