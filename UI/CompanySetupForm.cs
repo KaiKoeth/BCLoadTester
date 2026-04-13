@@ -14,11 +14,11 @@ public class CompanySetupForm : Form
     private DataGridView grid;
     private bool _isDirty = false;
     private bool _suppressDirty = false;
-    private readonly Dictionary<(string Company, string Worker), int> _dynamicConcurrency;
+    private readonly Dictionary<(string Company, WorkerType Worker), int> _dynamicConcurrency;
 
     public CompanySetupForm(
     AppConfig config,
-    Dictionary<(string Company, string Worker), int> dynamicConcurrency)
+    Dictionary<(string Company, WorkerType Worker), int> dynamicConcurrency)
     {
         _config = config;
 
@@ -656,8 +656,8 @@ public class CompanySetupForm : Form
 
         int dynamicConcurrency = configuredConcurrency;
 
-        if (_dynamicConcurrency != null &&
-            _dynamicConcurrency.TryGetValue((company.name, workerType), out var dyn))
+        if (Enum.TryParse<WorkerType>(workerType, true, out var workerEnum) &&
+            _dynamicConcurrency.TryGetValue((company.name, workerEnum), out var dyn))
         {
             dynamicConcurrency = dyn;
         }

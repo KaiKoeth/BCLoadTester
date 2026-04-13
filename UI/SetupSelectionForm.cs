@@ -9,14 +9,15 @@ public class SetupSelectionForm : Form
     private AppConfig _config;
 
     // 🔥 NEU: Dynamic Concurrency vom Dashboard
-    private readonly Dictionary<(string Company, string Worker), int> _dynamicConcurrency;
+    private readonly Dictionary<(string Company, WorkerType Worker), int> _dynamicConcurrency;
 
     // 🔥 NEU: Change Tracking
     private bool _changed = false;
 
     public SetupSelectionForm(
-        AppConfig config,
-        Dictionary<(string Company, string Worker), int> dynamicConcurrency)
+    AppConfig config,
+    Dictionary<(string Company, WorkerType Worker), int> dynamicConcurrency
+    )
     {
         _config = config;
         _dynamicConcurrency = dynamicConcurrency;

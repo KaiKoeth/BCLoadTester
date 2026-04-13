@@ -38,7 +38,7 @@ public partial class LoadTestDashboard : Form
     ProgressBar progressLoading;
     private const int PoolWarningThreshold = 500;
     private const int PoolCriticalThreshold = 250;
-    private Dictionary<(string Company, string Worker), int> _dynamicConcurrency = new();
+    private Dictionary<(string Company, WorkerType Worker), int> _dynamicConcurrency = new();
     private NumericUpDown numTestDuration;
     private NumericUpDown numRemainingMinutes;
     private DateTime? _endTime;
@@ -55,12 +55,12 @@ public partial class LoadTestDashboard : Form
     private System.Windows.Forms.Timer? _runtimeTimer;
 
     // ✅ SAUBERE CACHES
-    private Dictionary<(string Company, string Worker), List<CustomerEntry>> _customerPools = new();
+    private Dictionary<(string Company, WorkerType Worker), List<CustomerEntry>> _customerPools = new();
     private Dictionary<string, List<string>> _invoiceCustomerNoCache = new();
     private Dictionary<string, List<string>> _creditMemoCustomerNoCache = new();
     private Dictionary<string, OrderStatusPool> _orderStatusCache = new();
     private Dictionary<string, WebOrderPayloadPool> _webOrderPoolCache = new();
-    private Dictionary<(string Company, string Worker), int> _workerCounts = new();
+    private Dictionary<(string Company, WorkerType Worker), int> _workerCounts = new();
     private Label lblRemainingTime;
 
     int _loadedCompanies = 0;
@@ -614,8 +614,8 @@ public partial class LoadTestDashboard : Form
         {
             foreach (var worker in _config.workers.Where(w => w.enabled))
             {
-                _dynamicConcurrency[(company.name, worker.type)] =
-                    ResolveConcurrency(worker); // Startwert
+                _dynamicConcurrency[(company.name, worker.TypeEnum)] =
+                ResolveConcurrency(worker);
             }
         }
 
@@ -839,7 +839,10 @@ public partial class LoadTestDashboard : Form
 
                     var data = await customerProvider.LoadCustomers(company.name, required);
 
-                    _customerPools[(company.name, workerType)] = data;
+                    var workerEnum = _config.workers
+                        .First(w => w.type == workerType)
+                        .TypeEnum;
+                    _customerPools[(company.name, workerEnum)] = data;
 
                     lblStatus.Text = $"Loading {company.name} - {workerType} ({required})";
                     Application.DoEvents();
@@ -1022,9 +1025,12 @@ public partial class LoadTestDashboard : Form
             {
 
                 string displayWorker = w.Worker;
+                var workerEnum = _config.workers
+                    .First(x => x.type == w.Worker)
+                    .TypeEnum;
 
                 // ✅ WICHTIG: (xN) aus Cache holen (NICHT aus String!)
-                if (_workerCounts.TryGetValue((companyName, w.Worker), out var count) && count > 1)
+                if (_workerCounts.TryGetValue((companyName, workerEnum), out var count) && count > 1)
                 {
                     displayWorker += $" (x{count})";
                 }
@@ -1302,7 +1308,7 @@ public partial class LoadTestDashboard : Form
 
                 foreach (var wp in workerPools)
                 {
-                    int rpm = cfg.rpm.GetValueOrDefault(wp.Key.Worker, 0);
+                    int rpm = cfg.rpm.GetValueOrDefault(wp.Key.Worker.ToString(), 0);
 
                     sb.AppendLine(
                         $"  {wp.Key.Worker,-25} | Loaded: {wp.Value.Count,6} | RPM: {rpm,4}"
@@ -1882,7 +1888,7 @@ public partial class LoadTestDashboard : Form
                 if (parallelWorkers > 1)
                     displayWorker += $" (x{parallelWorkers})";
 
-                _workerCounts[(company.name, worker.type)] = parallelWorkers;
+                _workerCounts[(company.name, worker.TypeEnum)] = parallelWorkers;
 
                 _allRows.Add(new DashboardRow
                 {
@@ -2405,7 +2411,11 @@ public partial class LoadTestDashboard : Form
                 stat.AvgMs
             );
 
-            var key = (stat.Company, stat.Worker);
+            var workerEnum = _config.workers
+                .First(w => w.type == stat.Worker)
+                .TypeEnum;
+
+            var key = (stat.Company, workerEnum);
 
             // 🔥 Minimum für relevante Last (verhindert "alles = 1")
             if (totalRpm > 50 && newConcurrency < 2)

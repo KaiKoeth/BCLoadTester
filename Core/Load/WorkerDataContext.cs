@@ -6,7 +6,7 @@ namespace BCLoadtester;
 public class WorkerDataContext
 {
     public WorkerDataContext(
-        Dictionary<(string Company, string Worker), List<CustomerEntry>> customerPools,
+        Dictionary<(string Company, WorkerType Worker), List<CustomerEntry>> customerPools,
         Dictionary<string, List<string>> invoiceCustomerNoCache,
         Dictionary<string, List<string>> creditMemoCustomerNoCache,
         Dictionary<string, OrderStatusPool> orderStatusCache,
@@ -19,7 +19,7 @@ public class WorkerDataContext
         WebOrderPoolCache = webOrderPoolCache;
     }
 
-    public Dictionary<(string Company, string Worker), List<CustomerEntry>> CustomerPools { get; }
+    public Dictionary<(string Company, WorkerType Worker), List<CustomerEntry>> CustomerPools { get; }
     public Dictionary<string, List<string>> InvoiceCustomerNoCache { get; }
     public Dictionary<string, List<string>> CreditMemoCustomerNoCache { get; }
     public Dictionary<string, OrderStatusPool> OrderStatusCache { get; }

@@ -9,7 +9,7 @@ namespace BCLoadtester;
 public class WorkerFactoryResult
 {
     public List<IWorker> Workers { get; set; } = new();
-    public Dictionary<(string Company, string Worker), int> WorkerCounts { get; set; } = new();
+    public Dictionary<(string Company, WorkerType Worker), int> WorkerCounts { get; set; } = new();
 }
 
 public static class WorkerFactory
@@ -19,7 +19,7 @@ public static class WorkerFactory
         HttpClient client,
         WorkerDataContext data,
         StatisticsService stats,
-        Dictionary<(string Company, string Worker), int> dynamicConcurrency)
+        Dictionary<(string Company, WorkerType Worker), int> dynamicConcurrency)
     {
         var result = new WorkerFactoryResult();
 
@@ -29,10 +29,10 @@ public static class WorkerFactory
 
             foreach (var worker in config.workers.Where(w => w.enabled))
             {
-                if (!company.rpm.TryGetValue(worker.type, out var rpm) || rpm <= 0)
+                if (!company.rpm.TryGetValue(worker.TypeEnum.ToString(), out var rpm) || rpm <= 0)
                     continue;
 
-                var key = (company.name, worker.type);
+                var key = (company.name, worker.TypeEnum);
 
                 // =========================
                 // 🔹 Daten auflösen
@@ -67,7 +67,7 @@ public static class WorkerFactory
                 for (int i = 0; i < parallelWorkers; i++)
                 {
                     var instance = CreateWorkerInstance(
-                        worker.type,
+                        worker.TypeEnum,
                         client,
                         context,
                         serviceRoot,
@@ -105,43 +105,43 @@ public static class WorkerFactory
     {
         var ctx = new WorkerContext();
 
-        var key = (company.name, worker.type);
+        var key = (company.name, worker.TypeEnum);
 
-        switch (worker.type)
+        switch (worker.TypeEnum)
         {
-            case WorkerTypes.EmailSearch:
-            case WorkerTypes.PMCSearch:
-            case WorkerTypes.CustomerCreate:
-            case WorkerTypes.CreateShipToAddress:
-            case WorkerTypes.CustomerHistory:
+            case WorkerType.EmailSearch:
+            case WorkerType.PMCSearch:
+            case WorkerType.CustomerCreate:
+            case WorkerType.CreateShipToAddress:
+            case WorkerType.CustomerHistory:
                 if (!data.CustomerPools.TryGetValue(key, out var customers) || customers.Count == 0)
                     return WorkerContext.Invalid;
 
                 ctx.Customers = customers;
                 break;
 
-            case WorkerTypes.GetInvoiceDetails:
+            case WorkerType.GetInvoiceDetails:
                 if (!data.InvoiceCustomerNoCache.TryGetValue(company.name, out var inv) || inv.Count == 0)
                     return WorkerContext.Invalid;
 
                 ctx.InvoiceCustomers = inv;
                 break;
 
-            case WorkerTypes.GetCreMemoDetails:
+            case WorkerType.GetCreMemoDetails:
                 if (!data.CreditMemoCustomerNoCache.TryGetValue(company.name, out var cm) || cm.Count == 0)
                     return WorkerContext.Invalid;
 
                 ctx.CreditMemoCustomers = cm;
                 break;
 
-            case WorkerTypes.OrderStatus:
+            case WorkerType.OrderStatus:
                 if (!data.OrderStatusCache.TryGetValue(company.name, out var os) || os.Count == 0)
                     return WorkerContext.Invalid;
 
                 ctx.OrderStatusPool = os;
                 break;
 
-            case WorkerTypes.WebOrderCreate:
+            case WorkerType.WebOrderCreate:
                 if (!data.WebOrderPoolCache.TryGetValue(company.name, out var wo))
                     return WorkerContext.Invalid;
 
@@ -154,7 +154,7 @@ public static class WorkerFactory
 
             default:
                 throw new InvalidOperationException(
-                    $"Unknown worker type '{worker.type}' in ResolveWorkerContext");
+                    $"Unknown worker type '{worker.TypeEnum}' in ResolveWorkerContext");
         }
 
         ctx.IsValid = true;
@@ -165,61 +165,61 @@ public static class WorkerFactory
     // 🔹 Worker Factory
     // =========================================================
     private static IWorker CreateWorkerInstance(
-        string type,
-        HttpClient client,
-        WorkerContext ctx,
-        string serviceRoot,
-        string apiRoot,
-        WorkerConfig worker,
-        Company company,
-        int workerRpm,
-        StatisticsService stats,
-        Func<int> concurrencyFunc)
+    WorkerType type,
+    HttpClient client,
+    WorkerContext ctx,
+    string serviceRoot,
+    string apiRoot,
+    WorkerConfig worker,
+    Company company,
+    int workerRpm,
+    StatisticsService stats,
+    Func<int> concurrencyFunc)
     {
         return type switch
         {
-            WorkerTypes.EmailSearch => new EmailSearchWorker(
+            WorkerType.EmailSearch => new EmailSearchWorker(
                 client, ctx.Customers!,
                 serviceRoot, apiRoot,
                 worker.endpoint,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
-            WorkerTypes.PMCSearch => new PhoneticSearchWorker(
+            WorkerType.PMCSearch => new PhoneticSearchWorker(
                 client, ctx.Customers!,
                 serviceRoot,
                 worker.endpoint,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
-            WorkerTypes.CustomerCreate => new CustomerCreateWorker(
+            WorkerType.CustomerCreate => new CustomerCreateWorker(
                 client, ctx.Customers!,
                 serviceRoot, apiRoot,
                 worker.endpoint,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
-            WorkerTypes.CreateShipToAddress => new ShipToAddressCreateWorker(
+            WorkerType.CreateShipToAddress => new ShipToAddressCreateWorker(
                 client, ctx.Customers!,
                 serviceRoot, apiRoot,
                 worker.endpoint,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
-            WorkerTypes.CustomerHistory => new CustomerHistoryWorker(
+            WorkerType.CustomerHistory => new CustomerHistoryWorker(
                 client,
                 ctx.Customers!,
                 serviceRoot, apiRoot,
                 worker.endpoint,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
-            WorkerTypes.WebOrderCreate => new WebOrderCreateWorker(
+            WorkerType.WebOrderCreate => new WebOrderCreateWorker(
                 client,
                 ctx.OrderStatusPool!,
                 ctx.WebOrderPool!,
@@ -228,7 +228,7 @@ public static class WorkerFactory
                 company.guid, company.name,
                 workerRpm,
                 stats,
-                type,
+                type.ToString(),
                 concurrencyFunc,
                 company.webOrderConfig?.bigOrderLines ?? 0,
                 company.webOrderConfig?.bigOrderIntervalMinutes ?? 0,
@@ -237,31 +237,31 @@ public static class WorkerFactory
                 company.webOrderConfig?.shippingChargeAmount ?? 0
             ),
 
-            WorkerTypes.GetInvoiceDetails => new GetInvoiceDetailsWorker(
+            WorkerType.GetInvoiceDetails => new GetInvoiceDetailsWorker(
                 client,
                 ctx.InvoiceCustomers!,
                 serviceRoot, apiRoot,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
-            WorkerTypes.GetCreMemoDetails => new GetCreMemoDetailsWorker(
+            WorkerType.GetCreMemoDetails => new GetCreMemoDetailsWorker(
                 client,
                 ctx.CreditMemoCustomers!,
                 serviceRoot, apiRoot,
                 worker.endpoint,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
-            WorkerTypes.OrderStatus => new OrderStatusWorker(
+            WorkerType.OrderStatus => new OrderStatusWorker(
                 client,
                 ctx.OrderStatusPool!,
                 serviceRoot, apiRoot,
                 worker.endpoint,
                 company.guid, company.name,
                 workerRpm,
-                stats, type, concurrencyFunc),
+                stats, type.ToString(), concurrencyFunc),
 
             _ => throw new InvalidOperationException(
                 $"Unknown worker type '{type}' for company '{company.name}'")
@@ -295,21 +295,6 @@ public static class WorkerFactory
         return 20;
     }
 
-    // =========================================================
-    // 🔹 Worker Type Constants (kein String-Wildwuchs mehr)
-    // =========================================================
-    private static class WorkerTypes
-    {
-        public const string EmailSearch = "EmailSearch";
-        public const string PMCSearch = "PMCSearch";
-        public const string CustomerCreate = "CustomerCreate";
-        public const string CreateShipToAddress = "CreateShipToAddress";
-        public const string CustomerHistory = "CustomerHistory";
-        public const string WebOrderCreate = "WebOrderCreate";
-        public const string GetInvoiceDetails = "GetInvoiceDetails";
-        public const string GetCreMemoDetails = "GetCreMemoDetails";
-        public const string OrderStatus = "OrderStatus";
-    }
 
     // =========================================================
     // 🔹 Context Object
